@@ -23,7 +23,7 @@ if(!is.null(dev.list())) dev.off()
 rm(list=ls())
 ```
 
-# 1. Data preparation
+# 1. Data preparationn
 ```{r}
 # Loading data
 #df <- read.csv("RealEstate_Georgia.csv", header=T)
