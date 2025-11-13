@@ -1,0 +1,31 @@
+---
+title: "Assignment2"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message    = FALSE,   # oculta mensajes
+  warning    = FALSE,   # oculta warnings
+  fig.align  = "center",
+  fig.width  = 4.5,       # tamaño base de los gráficos (en pulgadas)
+  fig.height = 3,
+  dpi        = 120,
+  out.width  = "70%",   # reduce tamaño en la página
+  fig.show   = "hold"   # agrupa varias figuras del chunk en el mismo bloque
+)
+```
+
+```{r, include=FALSE}
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+
+# Clean workspace
+rm(list=ls())
+```
+
+# 1. Data preparation
+```{r}
+# Loading data
+#df <- read.csv("RealEstate_Georgia.csv", header=T)
+```
+
