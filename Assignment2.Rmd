@@ -44,12 +44,9 @@ df[df == ""] <- NA
 # df$last_new_job = factor(df$last_new_job)
 ```
 
-## Removing duplicate or irrelevant observations
-We find that there's no duplicates in terms of ID in the dataset.
-```{r}
-```
 
-## Variables (NO HE SEPARAT PER NUM AND CAT PQ POTSER ALGUNA chr ES NUMERICA, 1. INSPECCIONAR VARIABLE I DESPRES DECIDIM )
+## Numerical variables
+
 We need to check the variables one by one in order to handle its missing data, filter unwanted outliers and regrouping for factors.
 
 ### enrollee_id
@@ -62,17 +59,6 @@ sum(duplicated(df$enrollee_id))
 sum(is.na(df$enrollee_id))
 ```
 
-### city
-The variable `city` has 123 levels and no missing data, some cities show really low frequence.
-This is a categorical variable, we convert it to factor.
-```{r}
-sum(is.na(df$city))
-length(unique(df$city)) #check number of unique categories -> 123
-table_city <- sort(table(df$city))
-head(table_city)   # cities with less frequence
-
-df$city <- factor(df$city)
-```
 ### city_development_index
 The variable `city_development_index` has no missing data and no outliers.
 ```{r}
@@ -87,8 +73,8 @@ varout <- summary(df$city_development_index)
 iqr = varout[5]-varout[2]
 usout <- varout[5]+3*iqr
 lsout <- varout[2]-3*iqr
-umout <- varout[5]+3*iqr
-lmout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
 
 sev_out <- which((df$city_development_index > usout) | (df$city_development_index < lsout))
 mild_out <- which((df$city_development_index > umout) | (df$city_development_index < lmout))
@@ -98,8 +84,8 @@ abline(v=usout,col='orange', add = T)
 abline(v=lsout,col='orange', add = T)
 abline(v=umout,col='orange', add = T)
 abline(v=lmout,col='orange', add = T)
-sev_out #0
-mild_out #0
+length(sev_out) #0
+length(mild_out) #17
 
 # Distribution
 hist(df$city_development_index, freq = F)
@@ -107,17 +93,78 @@ m = mean(df$city_development_index)
 std = sd(df$city_development_index)
 curve(dnorm(x,m,std),add=T, col="red")
 ```
+
+### training_hours
+The variable `training_hours` does not have any NA.
+
+```{r}
+sum(is.na(df$training_hours))
+
+summary(df$training_hours)
+hist(df$training_hours)
+
+# Outliers
+boxplot(df$training_hours, horizontal = T)
+varout <- summary(df$training_hours)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$training_hours > usout) | (df$training_hours < lsout))
+length(sev_out) #275
+mild_out <- which((df$training_hours > umout) | (df$training_hours < lmout))
+length(mild_out) #984
+
+boxplot(df$training_hours, horizontal = T)
+abline(v=usout,col='orange', add = T)
+abline(v=lsout,col='orange', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+sev_out #0
+mild_out #0
+
+# Distribution
+hist(df$training_hours, freq = F)
+m = mean(df$training_hours)
+std = sd(df$training_hours)
+curve(dnorm(x,m,std),add=T, col="red")
+```
+
+### target
+```{r}
+
+```
+
+
+## Categorical variables
+HEM DE CANVIAR COSES ENCARA PERQUE CREC QUE SÍ IMPUTEM TOTS ELS NAS I VALIDEM, SI NO CANVIA MOLT -> BEEE
+
+### city
+The variable `city` has 123 levels and no missing data, some cities show really low frequence.
+This is a categorical variable, we convert it to factor.
+```{r}
+sum(is.na(df$city))
+length(unique(df$city)) #check number of unique categories -> 123
+table_city <- sort(table(df$city))
+head(table_city)   # cities with less frequence
+
+df$city <- factor(df$city)
+```
+
 ### gender
 The variable `gender` has 4508 NA and 4 unique categories: NA, Female, Male and Other.
 
-To handle missing data, we'll create another category called Unknown, because removing 4508 rows means losing 23% of the dataset, and imputing Male/Female artificially introduces bias.
+To handle missing data, we can:
+- impute
 
 ```{r}
 sum(is.na(df$gender))
 length(unique(df$gender)) #check number of unique categories
 table_gender <- table(df$gender)
 
-df$gender <- ifelse(is.na(df$gender), "Unknown", df$gender)
+#df$gender <- ifelse(is.na(df$gender), "Unknown", df$gender)
 table_gender
 
 df$gender <- factor(df$gender)
@@ -191,6 +238,30 @@ length(unique(df$experience)) #check number of unique categories
 table_experience <- table(df$experience)
 barplot(table_experience)
 ```
+
+### company_size
+The variable `company_size` has??????
+
+
+```{r}
+sum(is.na(df$company_size))
+length(unique(df$company_size)) #check number of unique categories
+table_company_size <- table(df$company_size)
+barplot(table_company_size)
+```
+
+### company_type
+The variable `company_type` has??????
+
+
+```{r}
+sum(is.na(df$company_type))
+length(unique(df$company_type)) #check number of unique categories
+table_company_type <- table(df$company_type)
+barplot(table_company_type)
+```
+### last_new_job
+
 
 # 2. Profiling and Feature Selection
 
