@@ -23,9 +23,209 @@ if(!is.null(dev.list())) dev.off()
 rm(list=ls())
 ```
 
-# 1. Data preparationn
+# 1. Data preparation
+After checking the dataset, we observe that many variable's observation's are left in blank, we set it to NA because it's missing data.
+
 ```{r}
 # Loading data
-#df <- read.csv("RealEstate_Georgia.csv", header=T)
+df <- read.csv("aug_train.csv", header=T)
+summary(df)
+
+df[df == ""] <- NA
+# df$city = factor(df$city)
+# df$gender = factor(df$gender)
+# df$relevent_experience = factor(df$relevent_experience)
+# df$enrolled_university = factor(df$enrolled_university)
+# df$education_level = factor(df$education_level)
+# df$major_discipline = factor(df$major_discipline)
+# df$experience = factor(df$experience)
+# df$company_size = factor(df$company_size)
+# df$company_type = factor(df$company_type)
+# df$last_new_job = factor(df$last_new_job)
 ```
 
+## Removing duplicate or irrelevant observations
+We find that there's no duplicates in terms of ID in the dataset.
+```{r}
+```
+
+## Variables (NO HE SEPARAT PER NUM AND CAT PQ POTSER ALGUNA chr ES NUMERICA, 1. INSPECCIONAR VARIABLE I DESPRES DECIDIM )
+We need to check the variables one by one in order to handle its missing data, filter unwanted outliers and regrouping for factors.
+
+### enrollee_id
+We confirm that `enrollee_id` does not have duplicates or missing data, as we wanted, because it's the variable that identifies each enrollee. 
+
+But this variable is not necessary for modelling because it doesn't have predictive power, so we remove it.
+
+```{r}
+sum(duplicated(df$enrollee_id))
+sum(is.na(df$enrollee_id))
+```
+
+### city
+The variable `city` has 123 levels and no missing data, some cities show really low frequence.
+This is a categorical variable, we convert it to factor.
+```{r}
+sum(is.na(df$city))
+length(unique(df$city)) #check number of unique categories -> 123
+table_city <- sort(table(df$city))
+head(table_city)   # cities with less frequence
+
+df$city <- factor(df$city)
+```
+### city_development_index
+The variable `city_development_index` has no missing data and no outliers.
+```{r}
+sum(is.na(df$city_development_index))
+
+summary(df$city_development_index)
+hist(df$city_development_index)
+
+# Outliers
+boxplot(df$city_development_index, horizontal = T)
+varout <- summary(df$city_development_index)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+3*iqr
+lmout <- varout[2]-3*iqr
+
+sev_out <- which((df$city_development_index > usout) | (df$city_development_index < lsout))
+mild_out <- which((df$city_development_index > umout) | (df$city_development_index < lmout))
+
+boxplot(df$city_development_index, horizontal = T)
+abline(v=usout,col='orange', add = T)
+abline(v=lsout,col='orange', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+sev_out #0
+mild_out #0
+
+# Distribution
+hist(df$city_development_index, freq = F)
+m = mean(df$city_development_index)
+std = sd(df$city_development_index)
+curve(dnorm(x,m,std),add=T, col="red")
+```
+### gender
+The variable `gender` has 4508 NA and 4 unique categories: NA, Female, Male and Other.
+
+To handle missing data, we'll create another category called Unknown, because removing 4508 rows means losing 23% of the dataset, and imputing Male/Female artificially introduces bias.
+
+```{r}
+sum(is.na(df$gender))
+length(unique(df$gender)) #check number of unique categories
+table_gender <- table(df$gender)
+
+df$gender <- ifelse(is.na(df$gender), "Unknown", df$gender)
+table_gender
+
+df$gender <- factor(df$gender)
+```
+### relevent_experience
+The variable `relevent_experience` does not have missing data and it has 2 levels: 'Has relevant experience' and 'No relevant experience'
+
+```{r}
+sum(is.na(df$relevent_experience))
+length(unique(df$relevent_experience)) #check number of unique categories
+table_relevent_experience<- table(df$relevent_experience)
+table_relevent_experience
+
+df$relevent_experience <- factor(df$relevent_experience)
+```
+### enrolled_university
+The variable `enrolled_university` has 386 NA and 4 levels: NA, 'Full time course' and 'no_enrollment' and 'Part time course'.
+
+Like the variable `gender`, we convert the NAs to category Unknown.
+
+```{r}
+sum(is.na(df$enrolled_university))
+length(unique(df$enrolled_university)) #check number of unique categories
+table_enrolled_university <- table(df$enrolled_university)
+table_enrolled_university
+
+df$enrolled_university <- ifelse(is.na(df$enrolled_university), "Unknown", df$enrolled_university)
+table_enrolled_university
+
+df$enrolled_university <- factor(df$enrolled_university)
+```
+### education_level
+The variable `education_level` has 460 NA and 6 levels: NA, 'Graduate', 'High School','Masters','Phd' and 'Primary School'
+
+We convert the NAs to category Unknown.
+
+```{r}
+sum(is.na(df$education_level))
+length(unique(df$education_level)) #check number of unique categories
+table_education_level <- table(df$education_level)
+table_education_level
+
+df$education_level <- ifelse(is.na(df$education_level), "Unknown", df$education_level)
+table_education_level
+
+df$education_level <- factor(df$education_level)
+```
+### major_discipline
+The variable `major_discipline` has 2813 NA and 7 levels: NA, 'Arts', 'Business Degree','Humanities','No major','STEM' and 'Other'.
+
+We convert the NAs to category Unknown???
+
+```{r}
+sum(is.na(df$major_discipline))
+length(unique(df$major_discipline)) #check number of unique categories
+table_major_discipline <- table(df$major_discipline)
+table_major_discipline
+
+df$major_discipline <- ifelse(is.na(df$major_discipline), "Unknown", df$major_discipline)
+table_major_discipline
+
+df$major_discipline <- factor(df$major_discipline)
+```
+### experience
+The variable `experience` has 65 NA and 23 levels from <1 to >20. We should convert it to a numerical variable??????
+
+
+```{r}
+sum(is.na(df$experience))
+length(unique(df$experience)) #check number of unique categories
+table_experience <- table(df$experience)
+barplot(table_experience)
+```
+
+# 2. Profiling and Feature Selection
+
+
+
+
+# 3. Modeling using numeric variables using transformations if needed
+
+
+
+# 4. Residual analysis: unusual and influent data filtering
+
+
+
+
+# 5. Adding factor main effects to the best model containing numeric variables
+
+
+
+
+
+# 6. Residual analysis: unusual and influent data filtering
+
+
+
+
+
+# 7. Adding factor main effects and interactions (limit your statement to order 2) to the best model containing numeric variables
+
+
+
+
+# 8. Final Residual analysis: unusual and influent data filtering. Iterative process could be needed
+
+
+
+
+# 9. Goodness of fit and Model Interpretation
