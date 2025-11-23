@@ -32,22 +32,21 @@ df <- read.csv("aug_train.csv", header=T)
 summary(df)
 
 df[df == ""] <- NA
-# df$city = factor(df$city)
-# df$gender = factor(df$gender)
-# df$relevent_experience = factor(df$relevent_experience)
-# df$enrolled_university = factor(df$enrolled_university)
-# df$education_level = factor(df$education_level)
-# df$major_discipline = factor(df$major_discipline)
-# df$experience = factor(df$experience)
-# df$company_size = factor(df$company_size)
-# df$company_type = factor(df$company_type)
-# df$last_new_job = factor(df$last_new_job)
+```
+First, we check the missing data and zeros of the variables:
+
+```{r}
+check_na <- function(x) {
+  na = sum(is.na(x))
+  }
 ```
 
+```{r}
+results <- lapply(df, check_na)
+results
+```
 
 ## Numerical variables
-
-We need to check the variables one by one in order to handle its missing data, filter unwanted outliers and regrouping for factors.
 
 ### enrollee_id
 We confirm that `enrollee_id` does not have duplicates or missing data, as we wanted, because it's the variable that identifies each enrollee. 
@@ -60,10 +59,8 @@ sum(is.na(df$enrollee_id))
 ```
 
 ### city_development_index
-The variable `city_development_index` has no missing data and no outliers.
+The variable `city_development_index` has no NA and no severe outliers, only mild outliers, but we won't remove them.
 ```{r}
-sum(is.na(df$city_development_index))
-
 summary(df$city_development_index)
 hist(df$city_development_index)
 
@@ -98,8 +95,6 @@ curve(dnorm(x,m,std),add=T, col="red")
 The variable `training_hours` does not have any NA.
 
 ```{r}
-sum(is.na(df$training_hours))
-
 summary(df$training_hours)
 hist(df$training_hours)
 
@@ -132,17 +127,23 @@ std = sd(df$training_hours)
 curve(dnorm(x,m,std),add=T, col="red")
 ```
 
-### target
-```{r}
-
-```
-
 
 ## Categorical variables
-HEM DE CANVIAR COSES ENCARA PERQUE CREC QUE SÍ IMPUTEM TOTS ELS NAS I VALIDEM, SI NO CANVIA MOLT -> BEEE
+
+### target
+The variable `target` is a binary variable that defines the positive or negative outcome of the prediction.
+
+```{r}
+sum(is.na(df$target))
+length(unique(df$target)) #check number of unique categories -> 123
+table_target <- sort(table(df$target))
+head(table_target)   # cities with less frequence
+
+df$target <- factor(df$target)
+```
 
 ### city
-The variable `city` has 123 levels and no missing data, some cities show really low frequence.
+The variable `city` has 123 levels and no NA, some cities show really low frequence.
 This is a categorical variable, we convert it to factor.
 ```{r}
 sum(is.na(df$city))
@@ -156,16 +157,13 @@ df$city <- factor(df$city)
 ### gender
 The variable `gender` has 4508 NA and 4 unique categories: NA, Female, Male and Other.
 
-To handle missing data, we can:
-- impute
+To handle missing data, we can impute it later.
 
 ```{r}
 sum(is.na(df$gender))
 length(unique(df$gender)) #check number of unique categories
 table_gender <- table(df$gender)
-
-#df$gender <- ifelse(is.na(df$gender), "Unknown", df$gender)
-table_gender
+barplot(table_gender)
 
 df$gender <- factor(df$gender)
 ```
@@ -177,59 +175,56 @@ sum(is.na(df$relevent_experience))
 length(unique(df$relevent_experience)) #check number of unique categories
 table_relevent_experience<- table(df$relevent_experience)
 table_relevent_experience
+barplot(table_relevent_experience)
 
 df$relevent_experience <- factor(df$relevent_experience)
 ```
 ### enrolled_university
 The variable `enrolled_university` has 386 NA and 4 levels: NA, 'Full time course' and 'no_enrollment' and 'Part time course'.
 
-Like the variable `gender`, we convert the NAs to category Unknown.
+Like the variable `gender`, we impute it later.
 
 ```{r}
 sum(is.na(df$enrolled_university))
 length(unique(df$enrolled_university)) #check number of unique categories
 table_enrolled_university <- table(df$enrolled_university)
 table_enrolled_university
-
-df$enrolled_university <- ifelse(is.na(df$enrolled_university), "Unknown", df$enrolled_university)
-table_enrolled_university
+barplot(table_enrolled_university)
 
 df$enrolled_university <- factor(df$enrolled_university)
 ```
 ### education_level
 The variable `education_level` has 460 NA and 6 levels: NA, 'Graduate', 'High School','Masters','Phd' and 'Primary School'
 
-We convert the NAs to category Unknown.
+To remove the NAs, we impute it later.
 
 ```{r}
 sum(is.na(df$education_level))
 length(unique(df$education_level)) #check number of unique categories
 table_education_level <- table(df$education_level)
 table_education_level
-
-df$education_level <- ifelse(is.na(df$education_level), "Unknown", df$education_level)
-table_education_level
+barplot(table_education_level)
 
 df$education_level <- factor(df$education_level)
 ```
 ### major_discipline
 The variable `major_discipline` has 2813 NA and 7 levels: NA, 'Arts', 'Business Degree','Humanities','No major','STEM' and 'Other'.
 
-We convert the NAs to category Unknown???
+We impute it later.
 
 ```{r}
 sum(is.na(df$major_discipline))
 length(unique(df$major_discipline)) #check number of unique categories
 table_major_discipline <- table(df$major_discipline)
 table_major_discipline
-
-df$major_discipline <- ifelse(is.na(df$major_discipline), "Unknown", df$major_discipline)
-table_major_discipline
+barplot(table_major_discipline)
 
 df$major_discipline <- factor(df$major_discipline)
 ```
 ### experience
-The variable `experience` has 65 NA and 23 levels from <1 to >20. We should convert it to a numerical variable??????
+The variable `experience` has 65 NA and 23 levels from <1 to >20. 
+
+We group them in less levels.
 
 
 ```{r}
@@ -238,29 +233,159 @@ length(unique(df$experience)) #check number of unique categories
 table_experience <- table(df$experience)
 barplot(table_experience)
 ```
+We observe from the previous barplot that there are many people whose experience is 1 year, we make the groups by career stage and not separating equally. (NO SÉ!!!!!!!!!!!! PODEM CANVIAR-HO DESPRÉS)
+
+MANTENIM LA VARIABLE ORIGINAL O DIRECTAMENT LA CONVERTIM EN ELS GROUPS
+
+```{r}
+exp_clean <- df$experience
+exp_clean <- gsub("<1", "0", exp_clean) 
+exp_clean <- gsub(">20", "21", exp_clean)
+
+df$experience_num <- as.numeric(exp_clean)
+
+df$experience_group <- cut(
+  df$experience_num,
+  breaks = c(-1, 1, 5, 10, Inf),
+  labels = c("Junior", "Early", "Mid", "Senior")
+)
+
+barplot(table(df$experience_group))
+```
+
 
 ### company_size
-The variable `company_size` has??????
+The variable `company_size` has 5938 NAs and 9 unique categories including NA.
 
+We can regroup this variable as well.
 
 ```{r}
 sum(is.na(df$company_size))
 length(unique(df$company_size)) #check number of unique categories
+unique(df$company_size)
 table_company_size <- table(df$company_size)
 barplot(table_company_size)
 ```
+```{r}
+df$company_size_group <- dplyr::case_when(
+  df$company_size == "<10" ~ "Micro",
+  df$company_size %in% c("10/49", "50-99") ~ "Small",
+  df$company_size %in% c("100-500", "500-999") ~ "Medium",
+  df$company_size == "1000-4999" ~ "Large",
+  df$company_size %in% c("5000-9999", "10000") ~ "Very large"
+)
 
+df$company_size_group <- factor(df$company_size_group, levels = c("Micro", "Small", "Medium", "Large", "Very large"))
+
+barplot(table(df$company_size_group))
+```
 ### company_type
-The variable `company_type` has??????
+The variable `company_type` has 6140 NAs and 7 unique categories.
 
+We will impute the missing values.
 
+We can redefine the groups as well because it's really imbalanced.
 ```{r}
 sum(is.na(df$company_type))
 length(unique(df$company_type)) #check number of unique categories
+unique(df$company_type)
 table_company_type <- table(df$company_type)
 barplot(table_company_type)
 ```
+```{r}
+df$company_type_group <- dplyr::case_when(
+  df$company_type == "Pvt Ltd" ~ "Private",
+  df$company_type == "Public Sector" ~ "Public",
+  df$company_type %in% c("Early Stage Startup", "Funded Startup") ~ "Startup",
+  df$company_type %in% c("NGO", "Other") ~ "Other"
+)
+
+df$company_type_group <- factor(
+  df$company_type_group,
+  levels = c("Private", "Public", "Startup", "Non-profit/Other")
+)
+barplot(table(df$company_type_group))
+```
+
 ### last_new_job
+The variable `last_new_job` has 423 NA and 7 unique categories including NA.
+```{r}
+sum(is.na(df$last_new_job))
+length(unique(df$last_new_job)) #check number of unique categories
+unique(df$last_new_job)
+table_last_new_job <- table(df$last_new_job)
+barplot(table_last_new_job)
+```
+
+## Imputation
+We need to impute `gender`, `enrolled_university`, `education_level`,`major_discipline`,`experience_group`, `company_size_group`,`company_type_group`,`last_new_job`.
+
+We try to impute with imputeMCA but the results show that it imputed the NA to the higher frequency group. Because of this, we use mice to impute and the validation results show that the imputations has not changed the proportions of the different levels of the variables, especially in the variables with less NAs.
+
+```{r}
+library(missMDA)
+library(FactoMineR)
+
+cat_vars <- df[, c("gender",
+                   "enrolled_university",
+                   "education_level",
+                   "major_discipline",
+                   "experience_group",
+                   "company_size_group",
+                   "company_type_group",
+                   "last_new_job")]
+
+#nb_dim <- estim_ncpMCA(cat_vars)  # automatically suggests number of components
+#nb_dim$ncp   # 5
+
+#imp_mca <- imputeMCA(cat_vars, ncp = 5)
+#cat_imputed <- imp_mca$completeObs
+
+#### USING MICE?
+library(mice)
+res.mice <- mice(df[c(2:8,12:13,16:18)], m = 1, maxit = 5, seed = 123)
+dfimp <-complete(res.mice)
+summary(dfimp)
+
+# we put imputed variables back into original df
+df[, c("gender",
+       "enrolled_university",
+       "education_level",
+       "major_discipline",
+       "company_size_group",
+       "company_type_group",
+       "last_new_job")] <- cat_imputed
+
+summary(df)
+```
+
+Validation:
+```{r}
+vars <- c("gender",
+          "enrolled_university",
+          "education_level",
+          "major_discipline",
+          "experience_group",
+          "company_size_group",
+          "company_type_group",
+          "last_new_job")
+
+for (v in vars) {
+  cat("\n------", v, "------\n")
+  
+  # Proportions BEFORE (ignoring NA)
+  prop_before <- prop.table(table(df[[v]], useNA = "no"))
+  
+  # Proportions AFTER 
+  prop_after  <- prop.table(table(dfimp[[v]]))
+  
+  print(round(prop_before, 4))
+  print(round(prop_after, 4))
+}
+
+```
+
+
 
 
 # 2. Profiling and Feature Selection
