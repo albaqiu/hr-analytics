@@ -106,35 +106,6 @@ table(rowSums(is.na(df)))
 
 ```
 
-```{r}
-# Create a variable counting the number of missing values per individual (row)
-df$nb_miss <- rowSums(is.na(df))
-
-df$nb_miss <- factor(
-  cut(df$nb_miss,
-      breaks = c(-1, 0, 1, 2, 3, 4 ,5, 6, 7),
-      labels = c('0', '1', '2', '3', '4' ,'5', '6', '7')
-  )
-)
-
-# Check distribution
-table(df$nb_miss)
-
-
-# Profiling 
-
-library(FactoMineR)
-
-# # Analysis with price as a factor
-# res.cat <- catdes(df, which(names(df) == 'nb_miss'))
-# 
-# res.cat$quanti.var
-# res.cat$test.chi2
-# res.cat$quanti
-# res.cat$category
-
-
-```
 
 
 
@@ -145,9 +116,11 @@ After analyzing the individuals, we have observed that some of them have more th
 
 We have decided to select that as a threshold, and only keep the observations that don't have too many missing values, therefore removing 878 observations (4,5%).
 
+## OBSERVATION REMOVAL FOR A LOT OF NAs
+
 ```{r}
-# sum(rowSums(is.na(df)) >= 4)
-# df <- df[rowSums(is.na(df)) < 4, ]
+sum(rowSums(is.na(df)) >= 4)
+df <- df[rowSums(is.na(df)) < 4, ]
 ```
 For the rest of the missing values, since they don't represent a very big loss of information, we will analyze more in depth in the following sections:
   - Missingness mechanism (MCAR...)
@@ -397,8 +370,19 @@ The thing is, the category No Major is difficult to assess, given that it corres
 The treatment we are going to apply for these cases is to leave them as No Major, since there is no way to tell whether they belong to STEM or not.
 
 ```{r}
-df$major_group[df$education_level %in% c("High School", "Primary School")] <- "No major"
-df$major_group[df$major_discipline == "STEM"] <- "STEM"
+# df$company_size_group <- dplyr::case_when(
+#   df$company_size == "<10" ~ "Micro",
+#   df$company_size %in% c("10/49", "50-99") ~ "Small",
+#   df$company_size %in% c("100-500", "500-999") ~ "Medium",
+#   df$company_size == "1000-4999" ~ "Large",
+#   df$company_size %in% c("5000-9999", "10000") ~ "Very large"
+# )
+```
+
+
+```{r}
+# df$major_group[df$education_level %in% c("High School", "Primary School")] <- "No major"
+# df$major_group[df$major_discipline == "STEM"] <- "STEM"
 
 ```
 
@@ -406,31 +390,14 @@ df$major_group[df$major_discipline == "STEM"] <- "STEM"
 ```{r}
 library(dplyr)
 
-df$major_group[df$major_discipline == "STEM"] <- "STEM"
-
-
-
-
-
-
-# Work on character to avoid factor level issues
 df$major_discipline <- as.character(df$major_discipline)
 
-df$major_discipline <- case_when(
-  # 1) No major because level of education does not have a major
+df$major_discipline <- dplyr::case_when(
   df$education_level %in% c("High School", "Primary School") ~ "No major",
-  
-  # 2) STEM majors
   df$major_discipline == "STEM" ~ "STEM",
-  
-  # 3) Non-STEM majors
-  df$major_discipline %in% c("Other", "Arts", "Business Degree", "Humanities") ~ "Non-STEM",
-  
-  # 4) Everything else (including real missing from Graduate/Master)
-  TRUE ~ NA_character_
+  df$major_discipline %in% c("Other", "Arts", "Business Degree", "Humanities") ~ "Non-STEM"
 )
 
-# Turn into factor with desired order
 df$major_discipline <- factor(df$major_discipline,
                                   levels = c("STEM", "Non-STEM", "No major"))
 
@@ -510,6 +477,7 @@ We can redefine the groups as well because it's really imbalanced.
 sum(is.na(df$company_type))
 length(unique(df$company_type)) #check number of unique categories
 unique(df$company_type)
+table_company_type
 table_company_type <- table(df$company_type)
 barplot(table_company_type)
 ```
@@ -523,9 +491,11 @@ df$company_type_group <- dplyr::case_when(
 
 df$company_type_group <- factor(
   df$company_type_group,
-  levels = c("Private", "Public", "Startup", "Non-profit/Other")
+  levels = c("Private", "Public", "Startup", "Other")
 )
+table(df$company_type_group)
 barplot(table(df$company_type_group))
+summary(df$company_type_group)
 ```
 
 ### last_new_job
@@ -536,6 +506,58 @@ length(unique(df$last_new_job)) #check number of unique categories
 unique(df$last_new_job)
 table_last_new_job <- table(df$last_new_job)
 barplot(table_last_new_job)
+```
+
+
+```{r}
+# Variables
+check_na <- function(x) {
+  na = sum(is.na(x))
+  }
+results <- lapply(df, check_na)
+results
+
+# Individuals
+table(rowSums(is.na(df)))
+```
+To explore potential linear dependencies among the numerical features, we computed their correlation matrix.
+
+```{r}
+cor(df$city_development_index, df$training_hours, use = "complete.obs", method = "pearson")
+
+```
+
+# Missing data profiling
+
+```{r}
+# Create a variable counting the number of missing values per individual (row)
+df$nb_miss <- rowSums(is.na(df))
+
+df$nb_miss <- factor(
+  cut(df$nb_miss,
+      breaks = c(-1, 0, 1, 2, 3, 4 ,5, 6, 7),
+      labels = c('0', '1', '2', '3', '4' ,'5', '6', '7')
+  )
+)
+
+# Check distribution
+table(df$nb_miss)
+
+
+# Profiling 
+
+library(FactoMineR)
+
+dfprof <- df[,-c(7,8,13,14,15)]
+names(dfprof)
+res.cat <- catdes(dfprof, which(names(dfprof) == 'nb_miss'))
+
+res.cat$quanti.var
+res.cat$test.chi2
+res.cat$quanti
+res.cat$category
+
+
 ```
 
 ## Imputation
