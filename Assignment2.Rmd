@@ -4,14 +4,14 @@ output: html_document
 ---
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  message    = FALSE,   # oculta mensajes
-  warning    = FALSE,   # oculta warnings
+  message    = FALSE,   
+  warning    = FALSE,   
   fig.align  = "center",
-  fig.width  = 4.5,       # tamaño base de los gráficos (en pulgadas)
+  fig.width  = 4.5,       
   fig.height = 3,
   dpi        = 120,
-  out.width  = "70%",   # reduce tamaño en la página
-  fig.show   = "hold"   # agrupa varias figuras del chunk en el mismo bloque
+  out.width  = "70%",   
+  fig.show   = "hold"   
 )
 ```
 
@@ -24,29 +24,34 @@ rm(list=ls())
 ```
 
 # 1. Data preparation
-After checking the dataset, we observe that many variable's observation's are left in blank, we set it to NA because it's missing data.
+
+The first step is to check the dataset, to understand which variables we can work with, and set their datatypes accordingly.
 
 ```{r}
 # Loading data
 df <- read.csv("aug_train.csv", header=T)
 summary(df)
 
+```
+We will set the datatypes accordingly.
+
+After checking the dataset, we observe that many variable's observation's are left in blank, we set it to NA because it's missing data.
+
+```{r}
+# Converting characters to factor
+df[sapply(df, is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+# Converting binary columns (only 0 or 1) to factor
+df[sapply(df, function(x) all(na.omit(unique(x)) %in% c(0, 1)))] <- 
+  lapply(df[sapply(df, function(x) all(na.omit(unique(x)) %in% c(0, 1)))], as.factor)
+
+# Setting NAs
 df[df == ""] <- NA
-```
-First, we check the missing data and zeros of the variables:
-
-```{r}
-check_na <- function(x) {
-  na = sum(is.na(x))
-  }
+summary(df)
+str(df)
 ```
 
-```{r}
-results <- lapply(df, check_na)
-results
-```
-
-## Numerical variables
+After a first inspection, we have decided to remove `enrollee_id`and `city` from our working dataset, given that `enrollee_id` is an unnecessary id for each observation (after checking that there are no duplicates) and that `city` is a factor with a very high number of levels (123), whose information is contained in the `city_development_index` variable as can be seen by the distinct combination of city and citydevelopment index.
 
 ### enrollee_id
 We confirm that `enrollee_id` does not have duplicates or missing data, as we wanted, because it's the variable that identifies each enrollee. 
@@ -57,6 +62,109 @@ But this variable is not necessary for modelling because it doesn't have predict
 sum(duplicated(df$enrollee_id))
 sum(is.na(df$enrollee_id))
 ```
+
+
+```{r}
+
+library(dplyr)
+nrow(distinct(df, df$city, df$city_development_index))
+```
+
+
+```{r}
+df <- df[,-c(1,2)]
+str(df)
+```
+
+
+
+First, we check the missing data and zeros of the variables to see which ones are the most affected.
+Then, we also check the count of missing values per individual, to see which observations are not reliable (those with a high % of missing values), to discuss whether to remove them. 
+
+!!!!!!! Duplicates: after removing enrollee_id we found 60 observations that contain the same information. We need to check if they actually are or its just that they share the same exact profile.
+
+```{r}
+any(duplicated(df))
+sum(duplicated(df))
+
+dup_rows <- df %>% 
+  filter(duplicated(.) | duplicated(., fromLast = TRUE))
+
+nrow(dup_rows)
+
+
+# Variables
+check_na <- function(x) {
+  na = sum(is.na(x))
+  }
+results <- lapply(df, check_na)
+results
+
+# Individuals
+table(rowSums(is.na(df)))
+
+
+```
+
+```{r}
+# Create a variable counting the number of missing values per individual (row)
+df$nb_miss <- rowSums(is.na(df))
+
+df$nb_miss <- factor(
+  cut(df$nb_miss,
+      breaks = c(-1, 0, 1, 2, 3, 4 ,5, 6, 7),
+      labels = c('0', '1', '2', '3', '4' ,'5', '6', '7')
+  )
+)
+
+# Check distribution
+table(df$nb_miss)
+
+
+# Profiling 
+
+library(FactoMineR)
+
+# # Analysis with price as a factor
+# res.cat <- catdes(df, which(names(df) == 'nb_miss'))
+# 
+# res.cat$quanti.var
+# res.cat$test.chi2
+# res.cat$quanti
+# res.cat$category
+
+
+```
+
+
+
+
+
+-----------------------------------------------------------
+After analyzing the individuals, we have observed that some of them have more than 30% missing values. (missing values in more than 3 of the 12 total variables).
+
+We have decided to select that as a threshold, and only keep the observations that don't have too many missing values, therefore removing 878 observations (4,5%).
+
+```{r}
+# sum(rowSums(is.na(df)) >= 4)
+# df <- df[rowSums(is.na(df)) < 4, ]
+```
+For the rest of the missing values, since they don't represent a very big loss of information, we will analyze more in depth in the following sections:
+  - Missingness mechanism (MCAR...)
+  - Missingness per variable (some have around 30% of missing values)
+  
+
+We decided to analyze this by checking the profiling of a new variable containing the number of NAs for each observation, to try to identify patterns.
+
+```{r}
+
+```
+
+  
+  
+  
+## Numerical variables
+
 
 ### city_development_index
 The variable `city_development_index` has no NA and no severe outliers, only mild outliers, but we won't remove them.
@@ -90,6 +198,8 @@ m = mean(df$city_development_index)
 std = sd(df$city_development_index)
 curve(dnorm(x,m,std),add=T, col="red")
 ```
+
+
 
 ### training_hours
 The variable `training_hours` does not have any NA.
@@ -127,11 +237,59 @@ std = sd(df$training_hours)
 curve(dnorm(x,m,std),add=T, col="red")
 ```
 
+We see that the variable is left-skewed, so in order to properly address outlying observations, we will analyze the log-transformation of the variable.
+
+We can see how it does not have any extreme outliers, and it has 226 mild outliers because, since it comes from a discrete numerical variable, they are overlapping on the boxplot.
+
+```{r}
+df$log_th <- log(df$training_hours)
+
+# Outliers
+varout <- summary(df$log_th)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$log_th > usout) | (df$log_th < lsout))
+mild_out <- which((df$log_th > umout) | (df$log_th < lmout))
+
+boxplot(df$log_th, horizontal = T)
+abline(v=usout,col='orange', add = T)
+abline(v=lsout,col='orange', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+length(sev_out) #0
+length(mild_out) #17
+
+# Distribution
+hist(df$log_th, freq = F)
+m = mean(df$log_th)
+std = sd(df$log_th)
+curve(dnorm(x,m,std),add=T, col="red")
+which(df$log_th == 0)
+```
+
+We have decided to create a factor in order to check in the modelling stages whether the numerical variable or the factor is better for the model.
+
+```{r}
+df$f.training <- cut(
+  df$training_hour,
+  breaks = quantile(df$training_hour, probs = seq(0,1,0.2), na.rm=TRUE),
+  include.lowest = TRUE
+)
+
+barplot(table(df$f.training))
+summary(df$f.training)
+```
+
 
 ## Categorical variables
 
 ### target
 The variable `target` is a binary variable that defines the positive or negative outcome of the prediction.
+It is clearly unbalanced, which should be taken into account in the modelling stage.
 
 ```{r}
 sum(is.na(df$target))
@@ -140,19 +298,9 @@ table_target <- sort(table(df$target))
 head(table_target)   # cities with less frequence
 
 df$target <- factor(df$target)
+barplot(table(df$target))
 ```
 
-### city
-The variable `city` has 123 levels and no NA, some cities show really low frequence.
-This is a categorical variable, we convert it to factor.
-```{r}
-sum(is.na(df$city))
-length(unique(df$city)) #check number of unique categories -> 123
-table_city <- sort(table(df$city))
-head(table_city)   # cities with less frequence
-
-df$city <- factor(df$city)
-```
 
 ### gender
 The variable `gender` has 4508 NA and 4 unique categories: NA, Female, Male and Other.
@@ -168,7 +316,7 @@ barplot(table_gender)
 df$gender <- factor(df$gender)
 ```
 ### relevent_experience
-The variable `relevent_experience` does not have missing data and it has 2 levels: 'Has relevant experience' and 'No relevant experience'
+The variable `relevent_experience` does not have missing data and it has 2 levels: 'Has relevant experience' and 'No relevant experience', which we rename to Yes and No.
 
 ```{r}
 sum(is.na(df$relevent_experience))
@@ -178,6 +326,13 @@ table_relevent_experience
 barplot(table_relevent_experience)
 
 df$relevent_experience <- factor(df$relevent_experience)
+
+df$relevent_experience <- factor(df$relevent_experience,
+                                 levels = c("Has relevent experience",
+                                            "No relevent experience"),
+                                 labels = c("Yes", "No"))
+
+table_relevent_experience
 ```
 ### enrolled_university
 The variable `enrolled_university` has 386 NA and 4 levels: NA, 'Full time course' and 'no_enrollment' and 'Part time course'.
@@ -198,6 +353,8 @@ The variable `education_level` has 460 NA and 6 levels: NA, 'Graduate', 'High Sc
 
 To remove the NAs, we impute it later.
 
+
+
 ```{r}
 sum(is.na(df$education_level))
 length(unique(df$education_level)) #check number of unique categories
@@ -210,8 +367,6 @@ df$education_level <- factor(df$education_level)
 ### major_discipline
 The variable `major_discipline` has 2813 NA and 7 levels: NA, 'Arts', 'Business Degree','Humanities','No major','STEM' and 'Other'.
 
-We impute it later.
-
 ```{r}
 sum(is.na(df$major_discipline))
 length(unique(df$major_discipline)) #check number of unique categories
@@ -221,6 +376,70 @@ barplot(table_major_discipline)
 
 df$major_discipline <- factor(df$major_discipline)
 ```
+Taking into account the information in the education level variable, we saw that some categories like primary school and high school should not have a major because it is not applicable, and we decided to check whether all of the NA values are due to this reason, or if there are some other missing we should check.
+
+After checking the missigness distribution for each education level, we confirm that all high school and primary school have NA because they're not applicable, and therefore the only actual missing values for this variable are from graduate and masters.
+
+(Missingness NOT AT RANDOM!!!)
+
+```{r}
+table(df$education_level[is.na(df$major_discipline)])
+table(df$education_level)
+```
+
+
+The original variable is very unbalanced, since the most typical profile is 'STEM', and the other categories are less frequent.
+
+!!!!!!!!!! Therefore, we have decided to create a new factor with three levels: those with a STEM major, those with a non-STEM major, and those without a major.
+
+The thing is, the category No Major is difficult to assess, given that it corresponds to graduates and masters, which should have a major, but instead of declaring their major or stating others, chose No Major.
+
+The treatment we are going to apply for these cases is to leave them as No Major, since there is no way to tell whether they belong to STEM or not.
+
+```{r}
+df$major_group[df$education_level %in% c("High School", "Primary School")] <- "No major"
+df$major_group[df$major_discipline == "STEM"] <- "STEM"
+
+```
+
+
+```{r}
+library(dplyr)
+
+df$major_group[df$major_discipline == "STEM"] <- "STEM"
+
+
+
+
+
+
+# Work on character to avoid factor level issues
+df$major_discipline <- as.character(df$major_discipline)
+
+df$major_discipline <- case_when(
+  # 1) No major because level of education does not have a major
+  df$education_level %in% c("High School", "Primary School") ~ "No major",
+  
+  # 2) STEM majors
+  df$major_discipline == "STEM" ~ "STEM",
+  
+  # 3) Non-STEM majors
+  df$major_discipline %in% c("Other", "Arts", "Business Degree", "Humanities") ~ "Non-STEM",
+  
+  # 4) Everything else (including real missing from Graduate/Master)
+  TRUE ~ NA_character_
+)
+
+# Turn into factor with desired order
+df$major_discipline <- factor(df$major_discipline,
+                                  levels = c("STEM", "Non-STEM", "No major"))
+
+# Check
+table_major_discipline <- table(df$major_discipline)
+table_major_discipline
+barplot(table_major_discipline)
+```
+
 ### experience
 The variable `experience` has 65 NA and 23 levels from <1 to >20. 
 
@@ -228,14 +447,16 @@ We group them in less levels.
 
 
 ```{r}
+summary(df$experience)
 sum(is.na(df$experience))
 length(unique(df$experience)) #check number of unique categories
 table_experience <- table(df$experience)
 barplot(table_experience)
 ```
-We observe from the previous barplot that there are many people whose experience is 1 year, we make the groups by career stage and not separating equally. (NO SÉ!!!!!!!!!!!! PODEM CANVIAR-HO DESPRÉS)
 
-MANTENIM LA VARIABLE ORIGINAL O DIRECTAMENT LA CONVERTIM EN ELS GROUPS
+We make the groups by career stage, and we observe a balanced distribution and more interpretable results than with the original variable.
+
+
 
 ```{r}
 exp_clean <- df$experience
@@ -246,8 +467,8 @@ df$experience_num <- as.numeric(exp_clean)
 
 df$experience_group <- cut(
   df$experience_num,
-  breaks = c(-1, 1, 5, 10, Inf),
-  labels = c("Junior", "Early", "Mid", "Senior")
+  breaks = c(-1, 2, 5, 10, 19, Inf),
+  labels = c("Junior", "Early", "Mid", "Senior", ">20")
 )
 
 barplot(table(df$experience_group))
