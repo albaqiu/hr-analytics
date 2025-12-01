@@ -658,10 +658,23 @@ barplot(table(df3$f.experience), main = "Barplot of experience grouped", col="li
 
 # 2. Profiling and Feature Selection
 
+To explore how each feature relates to the target variable, we compute the `condes()` analysis. 
 
+- For numerical variables, the strongest association is found for `city_development_index` (correlation = –0.34), indicating that candidates living in highly developed cities are less likely to join the company. The variable `experience` also shows a negative association, while `training_hours` has almost no effect.
 
+- Among categorical features, the variables with the highest explanatory power are `company_size`, `company_type`, and `f.experience`, followed by `enrolled_university`, `relevant_experience` and `education_level`. Several categories, such as 'Undefined' in `company` characteristics or 'Junior' in `experience`, show a clear increase in the probability of the positive class, whereas more senior profiles and candidates working in medium or large companies tend to be less likely to change jobs.
 
-# 3. Modeling using numeric variables using transformations if needed
+```{r}
+# Profiling of target variable
+df3$target <- as.numeric(as.character(df3$target)) # target as numeric
+
+res.con <- condes(df3, which(names(df3) == 'target'))
+res.con$quanti
+res.con$quali
+res.con$category
+```
+
+# 3. Modeling using numeric variables
 
 
 
@@ -682,12 +695,12 @@ barplot(table(df3$f.experience), main = "Barplot of experience grouped", col="li
 
 
 
-# 7. Adding factor main effects and interactions (limit your statement to order 2) to the best model containing numeric variables
+# 7. Adding factor main effects and interactions to the best model containing numeric variables
 
 
 
 
-# 8. Final Residual analysis: unusual and influent data filtering. Iterative process could be needed
+# 8. Final Residual analysis: unusual and influent data filtering
 
 
 
