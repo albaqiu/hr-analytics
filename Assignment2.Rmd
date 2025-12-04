@@ -6,9 +6,6 @@ output: html_document
 knitr::opts_chunk$set(
   message    = FALSE,   
   warning    = FALSE,   
-  fig.align  = "center",
-  fig.width  = 4.5,       
-  fig.height = 3,
   dpi        = 120,
   out.width  = "70%",   
   fig.show   = "hold"   
@@ -22,6 +19,19 @@ if(!is.null(dev.list())) dev.off()
 # Clean workspace
 rm(list=ls())
 ```
+
+```{r}
+library(car)
+library(MASS)
+library(AER)
+library(effects)
+library(lmtest)
+library(FactoMineR)
+library(DescTools)
+library(ResourceSelection)
+library(statmod)
+```
+
 
 # 1. Data preparation
 
@@ -341,7 +351,7 @@ barplot(table(df$major_discipline), main = "Barplot of major_discipline grouped"
 #### experience
 The variable `experience` has 65 missing values and originally includes 23 different levels, ranging from '<1' to '>20' years. 
 
-Following the recommended approach for truncated data, we first convert the variable into a numeric format by replacing <1 with 0.1 and >20 with 25. We then create a second version of the variable (`f.experience`) by grouping the numeric values into broader and more interpretable career stages: 'Junior', 'Early', 'Mid', 'Senior' and '>20'.
+Following the recommended approach for truncated data, we first convert the variable into a numeric format by replacing <1 with 0.1 and >20 with 21. We then create a second version of the variable (`f.experience`) by grouping the numeric values into broader and more interpretable career stages: 'Junior', 'Early', 'Mid', 'Senior' and '>20'.
 
 ```{r}
 sum(is.na(df$experience))
@@ -355,9 +365,32 @@ barplot(table(df$experience), main = "Barplot of experience", col="lightblue")
 # Clean and convert experience to numeric
 exp_num <- df$experience
 exp_num <- gsub("<1", "0.1", exp_num)
-exp_num <- gsub(">20", "25", exp_num)
+exp_num <- gsub(">20", "21", exp_num)
 
 df$experience <- as.numeric(exp_num)
+
+# Outliers
+varout <- summary(df$experience)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$experience > usout) | (df$experience < lsout)); length(sev_out) #0
+mild_out <- which((df$experience > umout) | (df$experience < lmout)); length(mild_out) #224
+
+boxplot(df$experience, horizontal = T, main = "Boxplot experience")
+abline(v=usout,col='red', add = T)
+abline(v=lsout,col='red', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+
+# Distribution
+hist(df$experience, freq = F)
+m = mean(df$experience)
+std = sd(df$experience)
+curve(dnorm(x,m,std),add=T, col="red")
 ```
 
 ```{r}
@@ -478,21 +511,22 @@ table(df$f.experience[is.na(df$last_new_job)])
 To explore potential linear dependencies among the numerical features, we computed their correlation matrix.
 
 ```{r}
-dfnum <- df[,c(1, 7, 11)] # Numerical variables 
+df$target <- as.numeric(as.character(df$target))
+dfnum <- df[,c(1, 7, 11, 12)] # Numerical variables 
 cor(dfnum, use = "complete.obs")
 
 require(corrplot)
 M <- cor(dfnum, use = "complete.obs")
-par(mfrow = c(1,1))  # per si havies tocat abans
+par(mfrow = c(1,1)) 
 corrplot(
   M,
-  method = "number",   # només números
-  type   = "upper",    # només semicorrelació
-  tl.col = "black",    # noms en negre
-  tl.srt = 45,         # girar una mica les etiquetes
-  tl.cex = 0.9,        # mida etiquetes
-  number.cex = 1.2,    # números més grans
-  mar = c(0,0,1,0),    # marges petits
+  method = "number",   
+  type   = "upper",    
+  tl.col = "black",   
+  tl.srt = 45,        
+  tl.cex = 0.9,       
+  number.cex = 1.2,    
+  mar = c(0,0,1,0),   
   title = "Correlation matrix"
 )
 ```
@@ -658,7 +692,7 @@ barplot(table(df3$f.experience), main = "Barplot of experience grouped", col="li
 
 # 2. Profiling and Feature Selection
 
-To explore how each feature relates to the target variable, we compute the `condes()` analysis. 
+To explore how each feature relates to the target variable, we compute the `condes()` analysis. Since the target is coded as 0/1, its mean represents the probability of belonging to the positive class.
 
 - For numerical variables, the strongest association is found for `city_development_index` (correlation = –0.34), indicating that candidates living in highly developed cities are less likely to join the company. The variable `experience` also shows a negative association, while `training_hours` has almost no effect.
 
@@ -673,36 +707,339 @@ res.con$quanti
 res.con$quali
 res.con$category
 ```
+# 3. Split data into train and test
 
-# 3. Modeling using numeric variables
+80% train and 20% test.
+
+```{r}
+set.seed(1234)
+lltrain <- sample(1:nrow(df3), round(0.8*nrow(df3), dig=0))
+dftrain <- df3[lltrain,]
+dftest <- df3[-lltrain,]
+```
 
 
+# 4. Modeling using numeric variables
+
+```{r}
+# Null model (m0)
+m0 <- glm(target ~ 1, family="binomial", data = dftrain) 
+summary(m0)
+
+ptt <- prop.table(table(dftrain$target)); ptt # imbalanced
+```
+```{r}
+num_vars <- names(dftrain)[sapply(dftrain, is.numeric)][1:3]; num_vars
+
+# Model with all numeric vars (m1)
+m1 <- glm(target ~ experience + city_development_index + training_hours, family="binomial", data = dftrain)
+summary(m1)
+
+vif(m1)
+step(m1, k= log(nrow(dftrain)))
+Anova(m1, test="LR") # all significative
+anova(m0, m1, test="Chisq") # H0 rejected, model with all numeric variables is better
+```
+```{r}
+avPlots(m1)
+marginalModelPlots(m1)
+influencePlot(m1)
+plot(allEffects(m1), axes=list(y=list(lab="target")))
+```
+
+
+### Model transformations
+
+The Box–Tidwell test is applied ti the model including all numeric variables. The test indicates that no significant transformation is needed. 
+
+```{r}
+boxTidwell(target ~ experience + city_development_index + training_hours, data=dftrain)
+```
+
+### Alternative models
+
+```{r}
+# Model with experience as factor
+m2 <- glm(target ~ f.experience + city_development_index + training_hours, family="binomial", data = dftrain)
+summary(m2)
+
+vif(m2)
+step(m2, k= log(nrow(dftrain)))
+Anova(m2, test="LR") # all significative
+anova(m0, m2, test="Chisq") # H0 rejected, model with all numeric variables is better
+AIC(m1, m2)
+m1$dev; m2$dev
+```
+```{r}
+# Model with numeric variables chosen
+m3 <- glm(target ~ city_development_index + training_hours, family="binomial", data = dftrain)
+
+avPlots(m3)
+marginalModelPlots(m3)
+influencePlot(m3)
+plot(allEffects(m3), axes=list(y=list(lab="target")))
+```
+
+
+We conclude, that the model with `experience` as a factor has a lower AIC and deviance, although the difference is small. We choose to use `f.experience` because of the behavior of the numeric variable.
+
+After observing the marginal model plots, we define a new model adding a quadratic effect for `city_development_index`. In the marginal model plots, we see that this transformation may not be enough, we try to apply a cubic effect. 
+
+```{r}
+# Model with poly(city_development_index, 2)
+m4 <- glm(target ~ poly(city_development_index,2) + training_hours, family="binomial", data = dftrain)
+summary(m4)
+
+vif(m4)
+step(m4, k= log(nrow(dftrain)))
+Anova(m4, test="LR")
+anova(m3, m4, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4)
+```
+
+```{r}
+avPlots(m4)
+marginalModelPlots(m4)
+influencePlot(m4)
+plot(allEffects(m4), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3)
+m5 <- glm(target ~ poly(city_development_index,3) + training_hours, family="binomial", data = dftrain)
+summary(m5)
+
+vif(m5)
+step(m5, k= log(nrow(dftrain)))
+Anova(m5, test="LR")
+anova(m3, m5, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4, m5)
+```
+
+```{r}
+avPlots(m5)
+marginalModelPlots(m5)
+influencePlot(m5)
+plot(allEffects(m5), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3)
+m5b <- glm(target ~ poly(city_development_index,3) + f.training, family="binomial", data = dftrain)
+summary(m5b)
+
+vif(m5b)
+step(m5b, k= log(nrow(dftrain)))
+Anova(m5b, test="LR")
+AIC(m0, m5, m5b)
+```
+
+We decide to apply the cubic effect of `city_development_index`, and after checking the step function and the residual plots, we decide to remove `training_hours` from the model. We tried to include `training_hours` as a factor, but the BIC is higher and the step function chooses to exclude it as well. This can be also confirmed by the low correlation of `training_hours` with the target (-0.02).
+
+```{r}
+# Model with poly(city_development_index, 3) + experience
+m6 <- glm(target ~ experience + poly(city_development_index,3) + training_hours, family="binomial", data = dftrain)
+summary(m6)
+
+vif(m6)
+step(m6, k= log(nrow(dftrain)))
+Anova(m6, test="LR")
+anova(m5, m6, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4, m5, m6)
+```
+
+```{r}
+# Model with poly(city_development_index, 3) + experience
+m7 <- glm(target ~ experience + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m7)
+
+vif(m7)
+step(m7, k= log(nrow(dftrain)))
+Anova(m7, test="LR")
+anova(m7, m6, test="Chisq") 
+AIC(m0, m3, m4, m5, m6, m7)
+```
+
+```{r}
+avPlots(m7)
+marginalModelPlots(m7)
+influencePlot(m7)
+plot(allEffects(m7), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3) + poly(experience,2)
+m8 <- glm(target ~ poly(experience,2) + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m8)
+
+vif(m8)
+step(m8, k= log(nrow(dftrain)))
+Anova(m8, test="LR")
+anova(m7, m8, test="Chisq") 
+AIC(m0, m3, m4, m5, m6, m7, m8)
+```
+
+```{r}
+avPlots(m8)
+marginalModelPlots(m8)
+influencePlot(m8)
+plot(allEffects(m8), axes=list(y=list(lab="target")))
+```
+
+Comparing all the models, we find that `training_hours` is not significative, and applying a quadratic polynomic transformation to `experience` improves the model. Now we want to compare if using experience as a factor is better. 
+
+```{r}
+# Model with experience as factor
+m9 <- glm(target ~ f.experience + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m9)
+AIC(m0, m8, m9)
+
+marginalModelPlots(m9)
+```
+
+With these results, we observe that using experience as a factor we get an AIC slightly higher than using it as a numeric variable, but since the difference is not significant, and the numeric variable is artificial (it does not take into account the differences between the >20 group), the numeric model we keep is the one with cubic effect of `city_development_index` (m10). Later we will include `f.experience`.
+
+```{r}
+# Model with experience as factor
+m10 <- glm(target ~ poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m10)
+AIC(m0, m8, m9, m10)
+
+marginalModelPlots(m10)
+```
 
 # 4. Residual analysis: unusual and influent data filtering
 
+We observe that more `city_development_index` leads to less probability of changing to the new company. 
 
+```{r}
+avPlots(m10)
+marginalModelPlots(m10)
+influencePlot(m10)
+plot(allEffects(m10), axes=list(y=list(lab="target")))
+```
+
+```{r}
+llres <- which(abs(rstudent(m10)) > 3); llres
+llhat <- which(hatvalues(m10) > 3*length(coef(m10))/nrow(df)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(m10), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(m10)>0.005); lldist
+#df <- df[-common_outliers,] # remove influent data
+```
+
+Looking at the cook's distance plot, we observe some influent data but we choose to keep them as none have high leverage and residuals. 
 
 
 # 5. Adding factor main effects to the best model containing numeric variables
 
+```{r}
+# Model with all factors
+m11 <- glm(target ~ poly(city_development_index,3) + gender + relevent_experience + enrolled_university + education_level + major_discipline + company_size + company_type + last_new_job + f.experience, family="binomial", data = dftrain)
 
+summary(m11)
+step(m11, k= log(nrow(dftrain)))
+Anova(m11, test="LR")
+anova(m10, m11, test="Chisq") 
+AIC(m10, m11)
+```
 
+Step function chose to remove `gender`, `major_discipline`, `company_type` and `f.experience`. Although Anova method indicated that `company_type` and `f.experience` might be significant, which is the same conclusion comparing with the AIC method, we decided to trust BIC. Therefore, we remove them. 
 
+```{r}
+# Final model with numeric variables and factors
+m12 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job, family="binomial", data = dftrain)
+
+summary(m12)
+Anova(m12, test="LR")
+anova(m10, m12, test="Chisq") 
+AIC(m10, m11, m12)
+```
 
 # 6. Residual analysis: unusual and influent data filtering
 
+With the marginal model plots, we see that the linear predictor does not fit the data, we must add interactions. 
 
 
+```{r}
+avPlots(m12)
+marginalModelPlots(m12)
+influencePlot(m12)
+plot(allEffects(m12), axes=list(y=list(lab="target")))
+```
 
+```{r}
+llres <- which(abs(rstudent(m12)) > 3); llres
+llhat <- which(hatvalues(m12) > 3*length(coef(m10))/nrow(df)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(m12), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(m12)>0.005); lldist
+```
 
 # 7. Adding factor main effects and interactions to the best model containing numeric variables
 
+To check for potential nonlinear relationships between predictors, several interaction models were tested. Each main variable was combined with the others. The **step()** function was used to identify significant interactions based on BIC minimization.
 
+After applying step function, the model only includes the poly(city_development_index,3):company_size interaction. 
+
+```{r}
+mi1 <- glm(target ~ poly(city_development_index,3)*(relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+summary(mi1)
+step(mi1, k= log(nrow(dftrain))) # poly(city_development_index,3):company_size 
+Anova(mi1, test="LR")
+anova(m12, mi1, test="Chisq") 
+AIC(m10, m12, mi1)
+```
+
+Now we try to include all interactions between the factors. 
+
+```{r}
+# Exlcuding factors from step
+mi2 <- glm(target ~ relevent_experience*(enrolled_university + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi2, k= log(nrow(dftrain))) # relevent_experience:last_new_job
+
+mi3 <- glm(target ~ enrolled_university*(relevent_experience + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi3, k= log(nrow(dftrain))) # nothing
+
+mi4 <- glm(target ~ education_level*(enrolled_university + relevent_experience + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi4, k= log(nrow(dftrain))) # nothing
+
+mi5 <- glm(target ~ company_size*(enrolled_university + relevent_experience + education_level + last_new_job), family="binomial", data = dftrain)
+
+step(mi5, k= log(nrow(dftrain))) # nothing
+
+mi6 <- glm(target ~ last_new_job*(enrolled_university + relevent_experience + education_level + company_size), family="binomial", data = dftrain)
+
+step(mi6, k= log(nrow(dftrain))) # last_new_job:relevent_experience
+```
+
+Finally, including all the significant inetractions, the final model fits the data. 
+
+```{r}
+mfin <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+
+marginalModelPlots(mfin)
+```
 
 
 # 8. Final Residual analysis: unusual and influent data filtering
 
-
+```{r}
+avPlots(mfin)
+marginalModelPlots(mfin)
+influencePlot(mfin)
+plot(allEffects(mfin), axes=list(y=list(lab="target")))
+residualPlots(mfin, id=list(n=0))
+```
 
 
 # 9. Goodness of fit and Model Interpretation
