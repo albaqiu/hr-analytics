@@ -1032,6 +1032,14 @@ mfin <- glm(target ~ poly(city_development_index,3) + relevent_experience +
 marginalModelPlots(mfin)
 ```
 
+```{r}
+avPlots(mfin_exp)
+marginalModelPlots(mfin_exp)
+influencePlot(mfin_exp)
+plot(allEffects(mfin_exp), axes=list(y=list(lab="target")))
+residualPlots(mfin_exp, id=list(n=0))
+```
+
 
 # 8. Final Residual analysis: unusual and influent data filtering
 
@@ -1042,6 +1050,7 @@ influencePlot(mfin)
 plot(allEffects(mfin), axes=list(y=list(lab="target")))
 residualPlots(mfin, id=list(n=0))
 ```
+
 Diagnose your final model by detecting influential observations.
 
 ```{r}
@@ -1220,33 +1229,30 @@ AUC(predict(mfin,type="response"),dftrain$target)
 # Point 10: Forecasting capability of the final model. Test sample
 
 ```{r}
-# It assumes sample split into dfwork and dftest
-# Definition of new party
-dftest$party <- as.factor(paste(dftest$p,dftest$arty))
-summary(as.factor(c(dftest$p,dftest$arty)))
-# Grouping levels
-partit <- rep("weak",length(dftest$party))
-partit[dftest$party=="strong rep"|dftest$party=="strong dem"] <- "strong"
-partit[dftest$party=="ind ind"] <- "ind"
-newparty <-factor(partit,levels=c("ind","weak","strong"))
-dftest <- data.frame(dftest,newparty)
+probtest <- predict(mfin, newdata=dftest, type="response")
+target.test <- ifelse(probtest<0.4,0,1)
+table(target.test,dftest$target)
 
-dfwork.fin <- m12
-prob.vot <- predict(dfwork.fin, newdata=dftest, type="response")
-pres.est <- ifelse(prob.vot<0.5,0,1)
-table(pres.est,dftest$pres)
-sum(diag(table(pres.est,dftest$pres)))/dim(dftest)[1]
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftest$target, target.test)
 
-# Model na?ve dummy model
-m0<-glm(pres ~ 1, family=binomial, data=dftest)
-summary(dfwork$pres) #mean = 0.7 --> more people on the sample choose vote, so the model fitted with this will predict 1 on the whole test set
-prob.vot0 <- m0$fit
-pres.est0 <- ifelse(prob.vot0<0.5,0,1)
-table(pres.est0,dftest$pres)
-table(pres.est0,dftest$pres)[1,2]/dim(dftest)[1]
-# 0.67, nuestro modelo que hemos hecho no ha sido MUCHO mejor que el dummy model, deberíamos mejorar nuestro modelo
+# METRICS
+accuracy <- sum(diag(table(target.test,dftest$target)))/(dim(dftest)[1]);accuracy
+precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
+recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+f1 <-2*((precision*recall)/(precision+recall)); f1
 
-library(ResourceSelection)
-hoslem.test(dftest$pres, prob.vot)
+PseudoR2(mfin, which='all') # library(DescTools)
+hoslem.test(dftest$target, probtest)
+```
+```{r}
+# Model naive dummy model
+m0<-glm(target ~ 1, family=binomial, data=dftest)
+prob.test0 <- m0$fit
+target.test0 <- ifelse(prob.test0<0.5,0,1)
+table(target.test0,dftest$target)
+
+accuracy0 <- table(target.test0,dftest$target)[1,2]/dim(dftest)[1]; accuracy0
 ```
 
