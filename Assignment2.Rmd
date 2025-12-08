@@ -718,17 +718,6 @@ dftrain <- df3[lltrain,]
 dftest <- df3[-lltrain,]
 ```
 
-```{r}
-write.csv(dftrain,"dftrain.csv",row.names=FALSE)
-write.csv(dftest,"dftest.csv",row.names=FALSE)
-```
-
-```{r}
-dftrain <- read.csv("dftrain.csv",header = TRUE)
-dftest <- read.csv("dftest.csv",header = TRUE)
-```
-
-
 
 
 
@@ -1040,7 +1029,7 @@ Finally, including all the significant inetractions, the final model fits the da
 mfin <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
     enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
 
-#marginalModelPlots(mfin)
+marginalModelPlots(mfin)
 ```
 
 
@@ -1066,12 +1055,11 @@ lldist <- which(cooks.distance(mfin)>0.005); lldist
 llrem <- which( rownames(dftrain) %in% c("17113","10402"));llrem # Returns row numbers in dfwork for row names 
 # we remove the ones that lose continuity
 
-#dftrain <- dftrain[-llrem,]
+dftrain <- dftrain[-llrem,]
 ```
 ```{r}
 mfin2 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
     enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
-
 ```
 
 ```{r}
@@ -1087,12 +1075,10 @@ llrem <- which( rownames(dftrain) %in% c("944","3473"));llrem # Returns row numb
 # we remove the ones that lose continuity
 
 dftrain <- dftrain[-llrem,]
-
 ```
 ```{r}
 mfin3 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
     enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
-
 ```
 
 ```{r}
@@ -1108,12 +1094,10 @@ llrem <- which( rownames(dftrain) %in% c("11470","15320"));llrem # Returns row n
 # we remove the ones that lose continuity
 
 dftrain <- dftrain[-llrem,]
-
 ```
 ```{r}
 mfin4 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
     enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
-
 ```
 
 ```{r}
@@ -1128,98 +1112,109 @@ influencePlot(mfin4)
 llrem <- which( rownames(dftrain) %in% c("11187","14820","4615","5968"));llrem # Returns row numbers in dfwork for row names 
 # we remove the ones that lose continuity
 
-#dftrain <- dftrain[-llrem,]
-
+dftrain <- dftrain[-llrem,]
 ```
+```{r}
+mfin5 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+```
+
+```{r}
+llres <- which(abs(rstudent(mfin5)) > 3); llres
+llhat <- which(hatvalues(mfin5) > 3*length(coef(mfin5))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin5), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin5)>0.01); lldist
+influencePlot(mfin5)
+```
+In the influent data assesment we removed 10 observations because they have larger Cook's distance.
+
+```{r}
+mfin <- mfin5
+```
+
+
 
 
 # 9. Goodness of fit and Model Interpretation
 
-
-
-# Forecasting capability of the final model in the work sample (lab)
+## Forecasting capability of the final model in the train sample
 
 
 ```{r}
 prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
 target.est <- ifelse(prob<0.5,0,1) #apply threshold
-tt <- table(target.est,dftrain$target);tt #confusion matrix
+
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftrain$target, prob)
 
 # METRICS
 accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
-
-# Precision: How many of the correctly predicted cases actually turned out to be positive.
 precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
-
-# Recall: How many of the actual positive cases the model is able to predict correctly.
 recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
-
-#F1: Metric which takes into account both precision and recall.
 f1 <-2*((precision*recall)/(precision+recall)); f1
 
-# Calculate the pseudo coefficient of determination of the final model and the Naglekerke coefficient. Do a goodness of fit test to the final model. Calculate the goodness of fit using the statistic proposed by Hosmer-Lemershow.
-
-PseudoR2(mfin, which='all' ) # library(DescTools)
-
+PseudoR2(mfin, which='all') # library(DescTools)
 hoslem.test(dftrain$target, fitted(mfin), g=10) # ResourceSelection library
 
 sum(residuals(mfin, type='pearson')^2) # Pearson's X2
 library(cvAUC)
-AUC(predict(m12,type="response"),dftrain$target)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
 
-# Confusion Matrix in ModelMetric library
-library(ModelMetrics)
-ModelMetrics::confusionMatrix(dftrain$pres, prob.vot)
 
+```{r}
 # Model naive
-m0<-glm(pres ~ 1, family=binomial, data=dfwork)
-prob.vot0 <- m0$fit
-pres.est0 <- ifelse(prob.vot0<0.5,0,1)
-tt0 <- table(pres.est0,dfwork$pres)
+m0<-glm(target ~ 1, family=binomial, data=dftrain)
+prob0 <- m0$fit
+target.est0 <- ifelse(prob0<0.5,0,1)
+tt0 <- table(target.est0,dftrain$target)
 tt0
-table(pres.est0,dfwork$pres)[1,2]/(dim(dfwork)[1])
+
+table(target.est0,dftrain$target)[1,2]/(dim(dftrain)[1])
 precision0 <- tt0[1,2]/(tt0[1,2] +tt0[1,1] );precision0
 recall0 <- tt0[1,2]/(tt0[1,2] +0 );recall0
 f10 <-2*((precision0*recall0)/(precision0+recall0)); f10
 
-summary(dfwork.fin)
-100*(1-dfwork.fin$dev/dfwork.fin$null.dev) # pR2 McFadden
+summary(mfin)
+100*(1-mfin$dev/mfin$null.dev) # pR2 McFadden
+```
 
-# Estadístic de Hosmer-Lemershow
-# seque<-c(seq(0,1,by=0.1));seque  # Original proposal
-seque<-quantile(fitted(dfwork.fin),probs=seq(0,1,by=0.1)) #get the quatiles
-fitgrup<-cut(fitted(dfwork.fin),breaks=seque); fitgrup #we create groups in term of the breaks -> each prediction belongs to 1 break
-cfitgrup<-table(dfwork$pres,fitgrup);cfitgrup # table that tells me how many real 1 and 0 there are in each group
-# we see that the number of 1s increases in the groups
-# there were 42 badly predicted in the first group
 
-cmodel1<-tapply(fitted(dfwork.fin),fitgrup,sum);cmodel1 #fitted: estimated probabilities, we sum the probabilities of the fitted values
-#the probabilities are the expected number of positive predicted cases inside each group
-cmodel0<-tapply(1-fitted(dfwork.fin),fitgrup,sum);cmodel0 # the expected number of negative cases inside each group
-
-cmodelgrup <- rbind(cmodel0,cmodel1);cmodelgrup #predicted data
-# if model is perfect, we expect the cmodelgrup and cfitgrup to match
-
-XHL<-sum(((cfitgrup-cmodelgrup)^2)/cmodelgrup);XHL #we check the square difference and dividing by the real value
-# this gives me a value that follow a chisquare distribution
-
-dfXHL<-8 #g-2 df; g: number of breaks that we have done, 10 breaks -2 = 8 df
-1-pchisq(XHL,dfXHL)
-# the higher this number, the distance is bigger, it tells me 0.001234, H0: model fits data, distance between both matrices is low
-# pvalue = 0.001234 --> reject H0 --> hoslem: model could not fit the data
-# esto es lo mismo que hoslem.test() --> aplicar esto directamente
-
+```{r}
 # Determine the predictive power by analyzing the ROC curve.
 library("ROCR")
-dadesroc<-prediction(predict(dfwork.fin,type="response"),dfwork$pres)
+dadesroc<-prediction(predict(mfin,type="response"),dftrain$target)
 par(mfrow=c(1,2))
 plot(performance(dadesroc,"err"))
 plot(performance(dadesroc,"tpr","fpr"))
 abline(0,1,lty=2)
 
 library(cvAUC)
-AUC(predict(dfwork.fin,type="response"),dfwork$pres)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
+```{r}
+prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
+target.est <- ifelse(prob<0.5,0,1) #apply threshold
 
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftrain$target, prob)
+
+# METRICS
+accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
+precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
+recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+f1 <-2*((precision*recall)/(precision+recall)); f1
+
+PseudoR2(mfin, which='all') # library(DescTools)
+hoslem.test(dftrain$target, fitted(mfin), g=10) # ResourceSelection library
+
+sum(residuals(mfin, type='pearson')^2) # Pearson's X2
+library(cvAUC)
+AUC(predict(mfin,type="response"),dftrain$target)
 ```
 
 # Point 10: Forecasting capability of the final model. Test sample
