@@ -1,0 +1,1287 @@
+---
+title: "Assignment2"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message    = FALSE,   
+  warning    = FALSE,   
+  dpi        = 120,
+  out.width  = "70%",   
+  fig.show   = "hold"   
+)
+```
+
+```{r, include=FALSE}
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+
+# Clean workspace
+rm(list=ls())
+```
+
+```{r}
+library(car)
+library(MASS)
+library(AER)
+library(effects)
+library(lmtest)
+library(FactoMineR)
+library(DescTools)
+library(ResourceSelection)
+library(statmod)
+```
+
+
+# 1. Data preparation
+
+The first step is to check the dataset, to understand which variables we can work with, and set their datatypes accordingly.
+
+```{r}
+# Loading data
+df <- read.csv("aug_train.csv", header=T)
+summary(df)
+```
+We will set the datatypes accordingly.
+
+After checking the dataset, we observe that many variable's observations are left in blank, we set them to NA because they are missing data.
+
+```{r}
+# Setting NAs
+df[df == ""] <- NA
+summary(df)
+str(df)
+
+# Converting characters to factor
+df[sapply(df, is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+# Converting binary columns (only 0 or 1) to factor
+df[sapply(df, function(x) all(na.omit(unique(x)) %in% c(0, 1)))] <- 
+  lapply(df[sapply(df, function(x) all(na.omit(unique(x)) %in% c(0, 1)))], as.factor)
+```
+
+After a first inspection, we have decided to remove `enrollee_id`and `city` from our working dataset, given that `enrollee_id` is an unnecessary id for each observation (after checking that there are no duplicates) and that `city` is a factor with a very high number of levels (123), whose information is contained in the `city_development_index` variable, as can be seen by the distinct combination of `city` and `city_development_index`.
+
+We confirm that `enrollee_id` does not have duplicates or missing data, as we wanted, because it's the variable that identifies each enrollee. But this variable is not necessary for modelling because it doesn't have predictive power, so we remove it.
+
+```{r}
+# Duplicates and missing values for enrollee_id
+sum(duplicated(df$enrollee_id))
+sum(is.na(df$enrollee_id))
+```
+
+```{r}
+# Distinct combination of city and city_development_index
+library(dplyr)
+nrow(distinct(df, df$city, df$city_development_index))
+```
+```{r}
+# Remove city and enrollee_id variables from the dataset
+df <- df[,-c(1,2)]
+str(df)
+```
+
+After removing `enrollee_id` we found 60 observations that contain the same information for every variable in the dataset. Considering the background of this dataset, this could happen, as the variables characterize the profile in a general way, making it possible to have the exact same information corresponding to two different individuals. Thus, we consider the best option is not to remove these observations and retain them.
+
+```{r}
+any(duplicated(df))
+sum(duplicated(df))
+
+dup_rows <- df %>% 
+  filter(duplicated(.) | duplicated(., fromLast = TRUE))
+
+nrow(dup_rows)
+```
+Then, we check the missing data of the variables to see which ones are the most affected. We also check the count of missing values per individual, to see which observations are not reliable (those with a high % of missing values), to discuss whether or not to remove them. 
+
+```{r}
+# Number of missing values: Variables
+check_na <- function(x) {
+  na = sum(is.na(x))
+  }
+results <- lapply(df, check_na); results
+
+# Number of missing values: Individuals
+table(rowSums(is.na(df)))
+```
+
+First, we checked the missing values at the individual level and observed that some observations have more than 30% missing values (missing in more than 3 of the 12 variables). However, before removing these individuals or applying general imputation, we decided to analyze the missingness mechanism to understand why this data is absent.
+
+Using the profiling of the missing values per variable, we identified three different behaviors:
+
+  - *Structural and Informative Missingness*: We confirmed that major_discipline is missing mainly for candidates with "High School" education, meaning the variable just doesn't apply (it is not a real missing). Similarly, company_size and company_type are missing when the candidate has no relevant experience or any previous employment.
+
+We will recode these to "No Major" and "Undefined" respectively, as this "missing" info is actually describing the candidate's situation (e.g., unemployment).
+
+  - *Systematic Non-Response*: The missingness in gender is associated with missing values in other personal variables, suggesting a specific group of users that choose not to share personal information. We will keep this as a specific category "Undefined" to capture this behavior, rather than imputing it.
+
+  - *Missing at Random (MAR)*: For experience, education_level, and last_new_job, the missing values depend on other observed variables don't show any clear pattern. We will further analyze whether these are genuine missing values, and if they are, we will use MICE imputation in later steps to fill them without losing information.
+
+After applying these specific treatments (recoding NAs to categories where appropriate), we will re-evaluate the missing values per individual to check if we still need to remove any rows.
+  
+```{r}
+
+# Detect the missingness mechanism (MAR vs MCAR)
+vars_with_na <- names(which(colSums(is.na(df)) > 0))
+
+for (var in vars_with_na) {
+  cat(paste0("\n>>> ", var, "\n"))
+  
+  df_shadow <- df
+  df_shadow$IS_MISSING <- factor(ifelse(is.na(df[[var]]), "Yes_Missing", "No_Present"))
+  df_shadow[[var]] <- NULL 
+  if("enrollee_id" %in% names(df_shadow)) df_shadow$enrollee_id <- NULL
+
+  res.cat <- catdes(df_shadow, num.var = which(names(df_shadow) == "IS_MISSING"), proba = 0.05)
+  if (!is.null(res.cat$test.chi2)) {
+    cat("\nGLOBAL ASSOCIATION\n")
+    print(head(res.cat$test.chi2, 10)) 
+  }
+  if (!is.null(res.cat$category) && "Yes_Missing" %in% names(res.cat$category)) {
+    cat("\nMISSINGNESS PROFILE\n")
+    print(head(res.cat$category[["Yes_Missing"]], 10))
+  }
+  
+  if (!is.null(res.cat$quanti.var)) {
+    cat("\nNUMERIC VARS\n")
+    print(res.cat$quanti.var)
+  }
+}
+```
+
+
+## 1.1. Variable analysis
+  
+### Numerical variables
+
+#### city_development_index
+The variable `city_development_index` has no NA and no severe outliers, only mild outliers, but we won't remove them.
+
+```{r}
+summary(df$city_development_index)
+
+# Outliers
+varout <- summary(df$city_development_index)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$city_development_index > usout) | (df$city_development_index < lsout))
+mild_out <- which((df$city_development_index > umout) | (df$city_development_index < lmout))
+
+boxplot(df$city_development_index, horizontal = T, main = "Boxplot city_development_index")
+abline(v=usout,col='red', add = T)
+abline(v=lsout,col='red', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+length(sev_out) #0
+length(mild_out) #17
+
+# Distribution
+hist(df$city_development_index, freq = F)
+m = mean(df$city_development_index)
+std = sd(df$city_development_index)
+curve(dnorm(x,m,std),add=T, col="red")
+```
+
+#### training_hours
+The variable `training_hours` does not have any missing values.
+
+```{r}
+summary(df$training_hours)
+
+# Outliers
+varout <- summary(df$training_hours)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$training_hours > usout) | (df$training_hours < lsout))
+length(sev_out) #275
+mild_out <- which((df$training_hours > umout) | (df$training_hours < lmout))
+length(mild_out) #984
+
+boxplot(df$training_hours, horizontal = T, main = "Boxplot training_hours")
+abline(v=usout,col='red', add = T)
+abline(v=lsout,col='red', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+
+# Distribution
+hist(df$training_hours, freq = F)
+m = mean(df$training_hours)
+std = sd(df$training_hours)
+curve(dnorm(x,m,std),add=T, col="red")
+```
+
+We see that the variable is left-skewed, so in order to properly address outlying observations, we will analyze the log-transformation of the variable.
+
+We can see how it does not have any extreme outliers, and it has 226 mild outliers because, since it comes from a discrete numerical variable, they are overlapping on the boxplot.
+
+```{r}
+df$log_th <- log(df$training_hours)
+
+# Outliers
+varout <- summary(df$log_th)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$log_th > usout) | (df$log_th < lsout)); length(sev_out) #0
+mild_out <- which((df$log_th > umout) | (df$log_th < lmout)); length(mild_out) #224
+
+boxplot(df$log_th, horizontal = T, main = "Boxplot log(training_hours)")
+abline(v=usout,col='red', add = T)
+abline(v=lsout,col='red', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+
+# Distribution
+hist(df$log_th, freq = F)
+m = mean(df$log_th)
+std = sd(df$log_th)
+curve(dnorm(x,m,std),add=T, col="red")
+which(df$log_th == 0)
+```
+
+We have decided to create a factor in order to check in the modelling stages whether the numerical variable or the factor is better for the model.
+
+```{r}
+df$f.training <- cut(
+  df$training_hour,
+  breaks = quantile(df$training_hour, probs = seq(0,1,0.2), na.rm=TRUE),
+  include.lowest = TRUE)
+
+barplot(table(df$f.training), main = "Barplot of f.training", col="lightblue")
+summary(df$f.training)
+```
+
+
+### Categorical variables
+
+#### target
+The variable `target` is a binary variable that defines the positive or negative outcome of the prediction. It has no missing data, and it is clearly unbalanced, which should be taken into account in the modelling stage.
+
+```{r}
+sum(is.na(df$target))
+table(df$target)
+
+barplot(table(df$target), main = "Barplot of target", col="lightblue")
+```
+
+#### gender
+The variable `gender` has 4508 missing values, apart from the categories 'Female', 'Male' and 'Other'. Because many people might simply choose not to indicate their gender, we decided to treat these NAs as a meaningful response rather than as missing data. For this reason, all NA values are assigned into a new category called 'Undefined', which is different from 'Other' and only reflects the absence of a stated gender. After this, the variable has no remaining missing values.
+
+```{r}
+sum(is.na(df$gender))
+table(df$gender)
+
+barplot(table(df$gender), main = "Barplot of gender", col="lightblue")
+```
+
+```{r}
+# Define new category 'Undefined'
+df$gender <- as.character(df$gender)        
+df$gender[is.na(df$gender)] <- "Undefined"
+df$gender <- factor(df$gender)     
+
+sum(is.na(df$gender))
+table(df$gender)
+barplot(table(df$gender), main = "Barplot of gender", col="lightblue")
+```
+
+#### relevent_experience
+The variable `relevent_experience` does not have missing data and it has 2 levels: 'Has relevant experience' and 'No relevant experience', which we rename to 'Yes' and 'No'.
+
+```{r}
+sum(is.na(df$relevent_experience))
+table(df$relevent_experience)
+
+# Rename categories
+df$relevent_experience <- factor(df$relevent_experience,
+                                 levels = c("Has relevent experience", "No relevent experience"),
+                                 labels = c("Yes", "No"))
+
+barplot(table(df$relevent_experience), main = "Barplot of relevent_experience", col="lightblue")
+```
+
+#### enrolled_university
+The variable `enrolled_university` contains 386 missing values and 3 levels: 'Full time course', 'no_enrollment' and 'Part time course'. The purpose of this variable is to indicate whether the person is currently studying or not. It is not easy to distinguish patterns for the missingness, because there is no clear path for a persons career (although unlikely, for example, maybe they have a Masters in a different degree and they are studying something else). For this reason, we decided to impute the missing values.
+
+```{r}
+sum(is.na(df$enrolled_university))
+table(df$enrolled_university)
+
+barplot(table(df$enrolled_university), main = "Barplot of enrolled_university", col="lightblue")
+```
+```{r}
+table(df$education_level[is.na(df$enrolled_university)])
+table(df$education_level)
+```
+
+
+#### education_level
+The variable `education_level` has 460 NA and 5 levels: 'Graduate', 'High School', 'Masters', 'Phd' and 'Primary School'. Since we cannot reliably assign these missing values to any of the existing levels, we will later apply an appropriate imputation method to handle them.
+
+```{r}
+sum(is.na(df$education_level))
+table(df$education_level)
+
+barplot(table(df$education_level), main = "Barplot of education_level", col="lightblue")
+```
+```{r}
+# table(df$major_discipline[is.na(df$education_level)])
+# table(df$education_level)
+```
+
+#### major_discipline
+The variable `major_discipline` contains 2813 missing values and 6 levels: 'Arts', 'Business Degree', 'Humanities', 'No major', 'STEM' and 'Other'.
+
+To understand why so many values are missing, we compare this variable with the information from `education_level`. This shows that all individuals with 'High School' and 'Primary School' education have NA in `major_discipline` simply because a major is not applicable at these levels. Therefore, the only truly missing cases are those from participants with 'Graduate' or 'Masters' education.
+
+```{r}
+sum(is.na(df$major_discipline))
+table(df$major_discipline)
+
+barplot(table(df$major_discipline), main = "Barplot of major_discipline", col="lightblue")
+```
+
+```{r}
+# Compare major_discipline with education_level
+table(df$education_level[is.na(df$major_discipline)])
+table(df$enrolled_university[is.na(df$major_discipline)])
+table(df$education_level)
+```
+
+Since the original distribution of majors is highly unbalanced, with 'STEM' being the dominant category, we decide to recode this variable into 3 groups: 'STEM', 'Non-STEM' and 'No major'. The 'Non-STEM' category includes 'Arts', 'Business Degree', 'Humanities' and 'Other'. The 'No major' group is kept for individuals who report “No major” or, as stated above, those that cannot have a major because of their education_level.
+
+After grouping the categories, 711 values remain missing. These NAs correspond to individuals who should have a declared major but did not report it. We will use a suitable imputation method.
+
+```{r}
+library(dplyr)
+
+df$major_discipline <- as.character(df$major_discipline)
+
+df$major_discipline <- dplyr::case_when(
+  df$education_level %in% c("High School", "Primary School") ~ "No major",
+  df$major_discipline == "STEM" ~ "STEM",
+  df$major_discipline %in% c("Other", "Arts", "Business Degree", "Humanities") ~ "Non-STEM"
+)
+
+df$major_discipline <- factor(df$major_discipline,
+                                  levels = c("STEM", "Non-STEM", "No major"))
+
+# Check after grouping
+sum(is.na(df$major_discipline)) # 711 NAs
+table(df$major_discipline)
+barplot(table(df$major_discipline), main = "Barplot of major_discipline grouped", col="lightblue")
+```
+
+#### experience
+The variable `experience` has 65 missing values and originally includes 23 different levels, ranging from '<1' to '>20' years. 
+
+Following the recommended approach for truncated data, we first convert the variable into a numeric format by replacing <1 with 0.1 and >20 with 21. We then create a second version of the variable (`f.experience`) by grouping the numeric values into broader and more interpretable career stages: 'Junior', 'Early', 'Mid', 'Senior' and '>20'.
+
+```{r}
+sum(is.na(df$experience))
+length(unique(df$experience)) # check number of unique categories
+table(df$experience)
+
+barplot(table(df$experience), main = "Barplot of experience", col="lightblue")
+```
+
+```{r}
+# Clean and convert experience to numeric
+exp_num <- df$experience
+exp_num <- gsub("<1", "0.1", exp_num)
+exp_num <- gsub(">20", "21", exp_num)
+
+df$experience <- as.numeric(exp_num)
+
+# Outliers
+varout <- summary(df$experience)
+iqr = varout[5]-varout[2]
+usout <- varout[5]+3*iqr
+lsout <- varout[2]-3*iqr
+umout <- varout[5]+1.5*iqr
+lmout <- varout[2]-1.5*iqr
+
+sev_out <- which((df$experience > usout) | (df$experience < lsout)); length(sev_out) #0
+mild_out <- which((df$experience > umout) | (df$experience < lmout)); length(mild_out) #224
+
+boxplot(df$experience, horizontal = T, main = "Boxplot experience")
+abline(v=usout,col='red', add = T)
+abline(v=lsout,col='red', add = T)
+abline(v=umout,col='orange', add = T)
+abline(v=lmout,col='orange', add = T)
+
+# Distribution
+hist(df$experience, freq = F)
+m = mean(df$experience)
+std = sd(df$experience)
+curve(dnorm(x,m,std),add=T, col="red")
+```
+
+```{r}
+# Group numeric values: f.experience
+df$f.experience <- cut(
+  df$experience,
+  breaks = c(-1, 2, 5, 10, 19, Inf),
+  labels = c("Junior", "Early", "Mid", "Senior", ">20")
+)
+
+# Check after grouping
+sum(is.na(df$f.experience))
+table(df$f.experience)
+barplot(table(df$f.experience), main = "Barplot of experience grouped", col="lightblue")
+```
+
+After checking the profile of the 65 missing values, we observe that most of them come from individuals with higher education levels (Graduate, Masters or PhD), for whom work experience should be known. Therefore, these are considered genuine missing cases rather than “no experience”, and we will impute them later using an appropriate multivariate imputation method.
+
+```{r}
+table(df$education_level[is.na(df$experience)])
+table(df$enrolled_university[is.na(df$experience)])
+```
+
+#### company_size
+The variable `company_size` contains 5938 missing values and 8 original categories. Since it cannot be meaningfully treated as a numeric variable, we group the existing levels into more interpretable categories. We merge the <10, 10/49 and 50-99 groups into a single 'Small' category, define 'Medium', 'Large', and 'Very large' as the remaining size brackets, and assign missing values to an additional category labelled 'Undefined'. This simplified version of the variable is easier to interpret.
+
+```{r}
+sum(is.na(df$company_size))
+length(unique(df$company_size)) #check number of unique categories
+table(df$company_size)
+
+barplot(table(df$company_size), main = "Barplot of company_size", col="lightblue")
+```
+```{r}
+# Discretize company_size
+df$company_size <- dplyr::case_when(
+  df$company_size %in% c("<10", "10/49", "50-99") ~ "Small",
+  df$company_size %in% c("100-500", "500-999") ~ "Medium",
+  df$company_size == "1000-4999" ~ "Large",
+  df$company_size %in% c("5000-9999", "10000+") ~ "Very large",
+  is.na(df$company_size) ~ "Undefined"
+)
+
+df$company_size <- factor(
+  df$company_size,
+  levels = c("Small", "Medium", "Large", "Very large", "Undefined"))
+
+# Check after grouping
+sum(is.na(df$company_size))
+table(df$company_size)
+barplot(table(df$company_size), main = "Barplot of company_size discretized", col="lightblue")
+```
+
+#### company_type
+The variable `company_type` contains 6140 missing values and 6 categories. Since the distribution is highly imbalanced, we group the different types of companies into broader categories: 'Private', 'Public', 'Startup' and 'Other'. Following the same criteria used in previous variables, we assign all missing values to an additional category labelled 'Undefined', as they likely correspond to respondents who did not report or did not know the company type. 
+
+```{r}
+sum(is.na(df$company_type))
+length(unique(df$company_type)) #check number of unique categories
+table(df$company_type)
+
+barplot(table(df$company_type), main = "Barplot of company_type", col="lightblue")
+```
+
+```{r}
+# Group levels of company_size and assign "Undefined" to NAs
+df$company_type <- dplyr::case_when(
+  df$company_type == "Pvt Ltd" ~ "Private",
+  df$company_type == "Public Sector" ~ "Public",
+  df$company_type %in% c("Early Stage Startup", "Funded Startup") ~ "Startup",
+  df$company_type %in% c("NGO", "Other") ~ "Other",
+  is.na(df$company_type) ~ "Undefined"
+)
+
+df$company_type <- factor(
+  df$company_type,
+  levels = c("Private", "Public", "Startup", "Other", "Undefined")
+)
+
+# Check after grouping
+sum(is.na(df$company_type))
+table(df$company_type)
+barplot(table(df$company_type), main = "Barplot of company_type grouped", col="lightblue")
+```
+
+#### last_new_job
+The variable `last_new_job` contains 423 missing values and 6 categories. After checking the experience profile of these cases, we observe that NAs appear across all experience levels, which indicates that they correspond to genuine missing values rather than “no experience” situations. For this reason, we keep the NAs at this stage and will handle them later using an imputation method.
+
+```{r}
+sum(is.na(df$last_new_job))
+length(unique(df$last_new_job)) #check number of unique categories
+table(df$last_new_job)
+
+barplot(table(df$last_new_job), main = "Barplot of last_new_job", col="lightblue")
+```
+
+```{r}
+df$last_new_job <- dplyr::case_when(
+  df$last_new_job %in% c("1", "2", "3") ~ df$last_new_job,
+  df$last_new_job %in% c("4", ">4") ~ "4+",
+  df$last_new_job == "never" ~ "never"
+)
+
+df$last_new_job <- factor(
+  df$last_new_job,
+  levels = c("never", "1", "2", "3", "4+"))
+
+barplot(table(df$last_new_job), main = "Barplot of last_new_job", col="lightblue")
+```
+
+
+```{r}
+table(df$f.experience[is.na(df$last_new_job)])
+```
+
+## 1.2. Correlation matrix
+
+To explore potential linear dependencies among the numerical features, we computed their correlation matrix.
+
+```{r}
+df$target <- as.numeric(as.character(df$target))
+dfnum <- df[,c(1, 7, 11, 12)] # Numerical variables 
+cor(dfnum, use = "complete.obs")
+
+require(corrplot)
+M <- cor(dfnum, use = "complete.obs")
+par(mfrow = c(1,1)) 
+corrplot(
+  M,
+  method = "number",   
+  type   = "upper",    
+  tl.col = "black",   
+  tl.srt = 45,        
+  tl.cex = 0.9,       
+  number.cex = 1.2,    
+  mar = c(0,0,1,0),   
+  title = "Correlation matrix"
+)
+```
+
+
+## 1.3. Missing values: variables and individuals
+
+After examining each variable individually, we applied different treatments depending on the nature of the missing values. Variables such as `gender`, `company_size` and `company_type` contain NAs that reflect non-response or non-applicability, so we assign these cases to a new' 'Undefined' category. In contrast, for variables where the missing values correspond to genuinely unknown information, such as `education_level`, `major_discipline`, `experience` and `last_new_job`, we keep the NAs unchanged to later impute them.
+
+After completing this variable-level cleaning, we now recalculate the percentage of missing values both per variable and per individual.
+
+Specifically, `education_level` still has 460 missing values, `major_discipline` has 711, `experience` retains 65 missing values, and `last_new_job` has 423.
+
+```{r}
+# Missing values per variable
+check_na <- function(x) {
+  na = sum(is.na(x))
+  }
+results <- lapply(df, check_na); results
+
+# Missing values per individual
+table(rowSums(is.na(df)))
+```
+Only 12 individuals present more than 30% missing values (4 or more missing variables). Since these observations contain insufficient information to be reliably imputed, and represent a negligible portion of the dataset, we decide to remove them from the analysis.
+
+```{r}
+sum(rowSums(is.na(df)) >= 4)
+df[rowSums(is.na(df)) >= 4,]
+```
+
+
+```{r}
+# Create a variable counting the number of missing values per individual (row)
+df$nb_miss <- rowSums(is.na(df))
+
+df$nb_miss <- factor(
+  cut(df$nb_miss,
+      breaks = c(-1, 0, 1, 2, 3, 4, 5),
+      labels = c('0', '1', '2', '3', '4' ,'5')
+  ))
+
+# Check distribution
+table(df$nb_miss)
+```
+
+```{r}
+# Profiling 
+library(FactoMineR)
+
+dfprof <- df[,-c(13)]
+names(dfprof)
+
+res.cat <- catdes(dfprof, which(names(dfprof) == 'nb_miss'))
+res.cat$quanti.var
+res.cat$test.chi2
+res.cat$quanti
+res.cat$category
+```
+
+```{r}
+# Remove individuals with excessive missing values
+df2 <- df[rowSums(is.na(df)) < 4, -c(13,15,16)]
+```
+
+
+## 1.4. Imputation
+To address the remaining missing values in the dataset, we apply a multivariate imputation using the **MICE algorithm**. Since only the original variables contain meaningful missing information, we impute `education_level`, `major_discipline`, `experience` and `last_new_job`, while excluding any derived variables. The imputation model includes the rest of the relevant predictors. After the imputation is completed, derived variables such as `f.experience` will be recomputed from the imputed values.
+
+```{r}
+library(mice) 
+
+# MICE imputation
+vars <- c( "target",
+  "gender", "relevent_experience", "enrolled_university",
+  "education_level", "major_discipline", "experience",
+  "company_size", "company_type", "last_new_job",
+  "city_development_index", "training_hours")
+
+df_mice <- df2[vars]
+
+ini  <- mice(df_mice, maxit = 0, printFlag = FALSE)
+meth <- ini$method
+
+meth["experience"]  <- "pmm"
+meth["education_level"] <- "polyreg"
+meth["major_discipline"]  <- "polyreg"
+meth["last_new_job"]  <- "polyreg"
+meth["enrolled_university"]  <- "polyreg"
+
+imp <- mice(
+  df_mice,
+  m = 5,
+  maxit = 5,
+  method = meth,
+  seed = 123)
+
+completed_df <- complete(imp)
+
+vars_no_impute <- setdiff(names(df2), vars)
+df3 <- cbind(completed_df, df2[vars_no_impute])
+
+# #### USING MICE?
+# library(mice)
+# res.mice <- mice(df[c(2:8,12:13,16:18)], m = 1, maxit = 5, seed = 123)
+# dfimp <-complete(res.mice)
+# summary(dfimp)
+# 
+# # we put imputed variables back into original df
+# df[, c("gender",
+#        "enrolled_university",
+#        "education_level",
+#        "major_discipline",
+#        "company_size_group",
+#        "company_type_group",
+#        "last_new_job")] <- cat_imputed
+# 
+# summary(df)
+```
+
+### Validation
+To validate the imputation, we use different approaches depending on the type of variable. For numerical variables, we compare the quantiles before and after imputation to ensure that the distribution remains consistent. For categorical variables, we compare the proportion of each category before and after imputation. In both cases, the distributions remain stable, indicating that the imputation has not distorted the underlying structure of the data.
+
+```{r}
+# Numerical vars validation
+quantile(df2$experience, probs=seq(0,1,by=0.1), na.rm=T)
+quantile(df3$experience, probs=seq(0,1,by=0.1), na.rm=F)
+```
+
+```{r}
+# Categorical vars validation
+cat_vars <- c("enrolled_university", "education_level", "major_discipline", "last_new_job")
+
+for (v in cat_vars) {
+  cat("\n", v, "\n")
+  
+  # Proportions before
+  prop_before <- prop.table(table(df2[[v]], useNA = "no"))
+  
+  # Proportions after
+  prop_after  <- prop.table(table(df3[[v]]))
+  
+  cat("Before (no NA):\n")
+  print(round(prop_before, 4))
+  
+  cat("After (imputed):\n")
+  print(round(prop_after, 4))
+}
+```
+
+```{r}
+# Define f.experience from experience imputed
+df3$f.experience <- cut(
+  df3$experience,
+  breaks = c(-1, 2, 5, 10, 19, Inf),
+  labels = c("Junior", "Early", "Mid", "Senior", ">20")
+)
+
+# Check after grouping
+sum(is.na(df3$f.experience))
+table(df3$f.experience)
+barplot(table(df3$f.experience), main = "Barplot of experience grouped", col="lightblue")
+```
+
+
+# 2. Profiling and Feature Selection
+
+To explore how each feature relates to the target variable, we compute the `condes()` analysis. Since the target is coded as 0/1, its mean represents the probability of belonging to the positive class.
+
+- For numerical variables, the strongest association is found for `city_development_index` (correlation = –0.34), indicating that candidates living in highly developed cities are less likely to join the company. The variable `experience` also shows a negative association, while `training_hours` has almost no effect.
+
+- Among categorical features, the variables with the highest explanatory power are `company_size`, `company_type`, and `f.experience`, followed by `enrolled_university`, `relevant_experience` and `education_level`. Several categories, such as 'Undefined' in `company` characteristics or 'Junior' in `experience`, show a clear increase in the probability of the positive class, whereas more senior profiles and candidates working in medium or large companies tend to be less likely to change jobs.
+
+```{r}
+# Profiling of target variable
+df3$target <- as.numeric(as.character(df3$target)) # target as numeric
+
+res.con <- condes(df3, which(names(df3) == 'target'))
+res.con$quanti
+res.con$quali
+res.con$category
+```
+# 3. Split data into train and test
+
+80% train and 20% test.
+
+```{r}
+set.seed(1234)
+lltrain <- sample(1:nrow(df3), round(0.8*nrow(df3), dig=0))
+dftrain <- df3[lltrain,]
+dftest <- df3[-lltrain,]
+```
+
+
+
+
+# 4. Modeling using numeric variables
+
+```{r}
+# Null model (m0)
+m0 <- glm(target ~ 1, family="binomial", data = dftrain) 
+summary(m0)
+
+ptt <- prop.table(table(dftrain$target)); ptt # imbalanced
+```
+```{r}
+num_vars <- names(dftrain)[sapply(dftrain, is.numeric)][1:3]; num_vars
+
+# Model with all numeric vars (m1)
+m1 <- glm(target ~ experience + city_development_index + training_hours, family="binomial", data = dftrain)
+summary(m1)
+
+vif(m1)
+step(m1, k= log(nrow(dftrain)))
+Anova(m1, test="LR") # all significative
+anova(m0, m1, test="Chisq") # H0 rejected, model with all numeric variables is better
+```
+```{r}
+avPlots(m1)
+marginalModelPlots(m1)
+influencePlot(m1)
+plot(allEffects(m1), axes=list(y=list(lab="target")))
+```
+
+
+### Model transformations
+
+The Box–Tidwell test is applied ti the model including all numeric variables. The test indicates that no significant transformation is needed. 
+
+```{r}
+# boxTidwell(target ~ experience + city_development_index + training_hours, data=dftrain)
+```
+
+### Alternative models
+
+```{r}
+# Model with experience as factor
+m2 <- glm(target ~ f.experience + city_development_index + training_hours, family="binomial", data = dftrain)
+summary(m2)
+
+vif(m2)
+step(m2, k= log(nrow(dftrain)))
+Anova(m2, test="LR") # all significative
+anova(m0, m2, test="Chisq") # H0 rejected, model with all numeric variables is better
+AIC(m1, m2)
+m1$dev; m2$dev
+```
+```{r}
+# Model with numeric variables chosen
+m3 <- glm(target ~ city_development_index + training_hours, family="binomial", data = dftrain)
+
+avPlots(m3)
+marginalModelPlots(m3)
+influencePlot(m3)
+plot(allEffects(m3), axes=list(y=list(lab="target")))
+```
+
+
+We conclude, that the model with `experience` as a factor has a lower AIC and deviance, although the difference is small. We choose to use `f.experience` because of the behavior of the numeric variable.
+
+After observing the marginal model plots, we define a new model adding a quadratic effect for `city_development_index`. In the marginal model plots, we see that this transformation may not be enough, we try to apply a cubic effect. 
+
+```{r}
+# Model with poly(city_development_index, 2)
+m4 <- glm(target ~ poly(city_development_index,2) + training_hours, family="binomial", data = dftrain)
+summary(m4)
+
+vif(m4)
+step(m4, k= log(nrow(dftrain)))
+Anova(m4, test="LR")
+anova(m3, m4, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4)
+```
+
+```{r}
+avPlots(m4)
+marginalModelPlots(m4)
+influencePlot(m4)
+plot(allEffects(m4), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3)
+m5 <- glm(target ~ poly(city_development_index,3) + training_hours, family="binomial", data = dftrain)
+summary(m5)
+
+vif(m5)
+step(m5, k= log(nrow(dftrain)))
+Anova(m5, test="LR")
+anova(m3, m5, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4, m5)
+```
+
+```{r}
+avPlots(m5)
+marginalModelPlots(m5)
+influencePlot(m5)
+plot(allEffects(m5), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3)
+m5b <- glm(target ~ poly(city_development_index,3) + f.training, family="binomial", data = dftrain)
+summary(m5b)
+
+vif(m5b)
+step(m5b, k= log(nrow(dftrain)))
+Anova(m5b, test="LR")
+AIC(m0, m5, m5b)
+```
+
+We decide to apply the cubic effect of `city_development_index`, and after checking the step function and the residual plots, we decide to remove `training_hours` from the model. We tried to include `training_hours` as a factor, but the BIC is higher and the step function chooses to exclude it as well. This can be also confirmed by the low correlation of `training_hours` with the target (-0.02).
+
+```{r}
+# Model with poly(city_development_index, 3) + experience
+m6 <- glm(target ~ experience + poly(city_development_index,3) + training_hours, family="binomial", data = dftrain)
+summary(m6)
+
+vif(m6)
+step(m6, k= log(nrow(dftrain)))
+Anova(m6, test="LR")
+anova(m5, m6, test="Chisq") # H0 rejected, model with transformation is better
+AIC(m0, m3, m4, m5, m6)
+```
+
+```{r}
+# Model with poly(city_development_index, 3) + experience
+m7 <- glm(target ~ experience + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m7)
+
+vif(m7)
+step(m7, k= log(nrow(dftrain)))
+Anova(m7, test="LR")
+anova(m7, m6, test="Chisq") 
+AIC(m0, m3, m4, m5, m6, m7)
+```
+
+```{r}
+avPlots(m7)
+marginalModelPlots(m7)
+influencePlot(m7)
+plot(allEffects(m7), axes=list(y=list(lab="target")))
+```
+
+```{r}
+# Model with poly(city_development_index, 3) + poly(experience,2)
+m8 <- glm(target ~ poly(experience,2) + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m8)
+
+vif(m8)
+step(m8, k= log(nrow(dftrain)))
+Anova(m8, test="LR")
+anova(m7, m8, test="Chisq") 
+AIC(m0, m3, m4, m5, m6, m7, m8)
+```
+
+```{r}
+avPlots(m8)
+marginalModelPlots(m8)
+influencePlot(m8)
+plot(allEffects(m8), axes=list(y=list(lab="target")))
+```
+
+Comparing all the models, we find that `training_hours` is not significative, and applying a quadratic polynomic transformation to `experience` improves the model. Now we want to compare if using experience as a factor is better. 
+
+```{r}
+# Model with experience as factor
+m9 <- glm(target ~ f.experience + poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m9)
+AIC(m0, m8, m9)
+
+marginalModelPlots(m9)
+```
+
+With these results, we observe that using experience as a factor we get an AIC slightly higher than using it as a numeric variable, but since the difference is not significant, and the numeric variable is artificial (it does not take into account the differences between the >20 group), the numeric model we keep is the one with cubic effect of `city_development_index` (m10). Later we will include `f.experience`.
+
+```{r}
+# Model with experience as factor
+m10 <- glm(target ~ poly(city_development_index,3), family="binomial", data = dftrain)
+summary(m10)
+AIC(m0, m8, m9, m10)
+
+marginalModelPlots(m10)
+```
+
+# 4. Residual analysis: unusual and influent data filtering
+
+We observe that more `city_development_index` leads to less probability of changing to the new company. 
+
+```{r}
+avPlots(m10)
+marginalModelPlots(m10)
+influencePlot(m10)
+plot(allEffects(m10), axes=list(y=list(lab="target")))
+```
+
+```{r}
+llres <- which(abs(rstudent(m10)) > 3); llres
+llhat <- which(hatvalues(m10) > 3*length(coef(m10))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(m10), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(m10)>0.005); lldist
+#df <- df[-common_outliers,] # remove influent data
+```
+
+Looking at the cook's distance plot, we observe some influent data but we choose to keep them as none have high leverage and residuals. 
+
+
+# 5. Adding factor main effects to the best model containing numeric variables
+
+```{r}
+# Model with all factors
+m11 <- glm(target ~ poly(city_development_index,3) + gender + relevent_experience + enrolled_university + education_level + major_discipline + company_size + company_type + last_new_job + f.experience, family="binomial", data = dftrain)
+
+summary(m11)
+step(m11, k= log(nrow(dftrain)))
+Anova(m11, test="LR")
+anova(m10, m11, test="Chisq") 
+AIC(m10, m11)
+```
+
+Step function chose to remove `gender`, `major_discipline`, `company_type` and `f.experience`. Although Anova method indicated that `company_type` and `f.experience` might be significant, which is the same conclusion comparing with the AIC method, we decided to trust BIC. Therefore, we remove them. 
+
+```{r}
+# Final model with numeric variables and factors
+m12 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job, family="binomial", data = dftrain)
+
+summary(m12)
+Anova(m12, test="LR")
+anova(m10, m12, test="Chisq") 
+AIC(m10, m11, m12)
+```
+
+# 6. Residual analysis: unusual and influent data filtering
+
+With the marginal model plots, we see that the linear predictor does not fit the data, we must add interactions. 
+
+
+```{r}
+avPlots(m12)
+marginalModelPlots(m12)
+influencePlot(m12)
+plot(allEffects(m12), axes=list(y=list(lab="target")))
+```
+
+```{r}
+llres <- which(abs(rstudent(m12)) > 3); llres
+llhat <- which(hatvalues(m12) > 3*length(coef(m10))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(m12), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(m12)>0.005); lldist
+```
+
+# 7. Adding factor main effects and interactions to the best model containing numeric variables
+
+To check for potential nonlinear relationships between predictors, several interaction models were tested. Each main variable was combined with the others. The **step()** function was used to identify significant interactions based on BIC minimization.
+
+After applying step function, the model only includes the poly(city_development_index,3):company_size interaction. 
+
+```{r}
+mi1 <- glm(target ~ poly(city_development_index,3)*(relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+summary(mi1)
+step(mi1, k= log(nrow(dftrain))) # poly(city_development_index,3):company_size 
+Anova(mi1, test="LR")
+anova(m12, mi1, test="Chisq") 
+AIC(m10, m12, mi1)
+```
+
+Now we try to include all interactions between the factors. 
+
+```{r}
+# Exlcuding factors from step
+mi2 <- glm(target ~ relevent_experience*(enrolled_university + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi2, k= log(nrow(dftrain))) # relevent_experience:last_new_job
+
+mi3 <- glm(target ~ enrolled_university*(relevent_experience + education_level + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi3, k= log(nrow(dftrain))) # nothing
+
+mi4 <- glm(target ~ education_level*(enrolled_university + relevent_experience + company_size + last_new_job), family="binomial", data = dftrain)
+
+step(mi4, k= log(nrow(dftrain))) # nothing
+
+mi5 <- glm(target ~ company_size*(enrolled_university + relevent_experience + education_level + last_new_job), family="binomial", data = dftrain)
+
+step(mi5, k= log(nrow(dftrain))) # nothing
+
+mi6 <- glm(target ~ last_new_job*(enrolled_university + relevent_experience + education_level + company_size), family="binomial", data = dftrain)
+
+step(mi6, k= log(nrow(dftrain))) # last_new_job:relevent_experience
+```
+
+Finally, including all the significant inetractions, the final model fits the data. 
+
+```{r}
+mfin <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+
+marginalModelPlots(mfin)
+```
+
+
+# 8. Final Residual analysis: unusual and influent data filtering
+
+```{r}
+avPlots(mfin)
+marginalModelPlots(mfin)
+influencePlot(mfin)
+plot(allEffects(mfin), axes=list(y=list(lab="target")))
+residualPlots(mfin, id=list(n=0))
+```
+
+Diagnose your final model by detecting influential observations.
+
+```{r}
+llres <- which(abs(rstudent(mfin)) > 3); llres
+llhat <- which(hatvalues(mfin) > 3*length(coef(mfin))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin)>0.005); lldist
+
+llrem <- which( rownames(dftrain) %in% c("17113","10402"));llrem # Returns row numbers in dfwork for row names 
+# we remove the ones that lose continuity
+
+dftrain <- dftrain[-llrem,]
+```
+```{r}
+mfin2 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+```
+
+```{r}
+llres <- which(abs(rstudent(mfin2)) > 3); llres
+llhat <- which(hatvalues(mfin2) > 3*length(coef(mfin2))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin2), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin2)>0.005); lldist
+#influencePlot(mfin2)
+
+llrem <- which( rownames(dftrain) %in% c("944","3473"));llrem # Returns row numbers in dfwork for row names 
+# we remove the ones that lose continuity
+
+dftrain <- dftrain[-llrem,]
+```
+```{r}
+mfin3 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+```
+
+```{r}
+llres <- which(abs(rstudent(mfin3)) > 3); llres
+llhat <- which(hatvalues(mfin3) > 3*length(coef(mfin3))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin3), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin3)>0.005); lldist
+influencePlot(mfin3)
+
+llrem <- which( rownames(dftrain) %in% c("11470","15320"));llrem # Returns row numbers in dfwork for row names 
+# we remove the ones that lose continuity
+
+dftrain <- dftrain[-llrem,]
+```
+```{r}
+mfin4 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+```
+
+```{r}
+llres <- which(abs(rstudent(mfin4)) > 3); llres
+llhat <- which(hatvalues(mfin4) > 3*length(coef(mfin4))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin4), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin4)>0.01); lldist
+influencePlot(mfin4)
+
+llrem <- which( rownames(dftrain) %in% c("11187","14820","4615","5968"));llrem # Returns row numbers in dfwork for row names 
+# we remove the ones that lose continuity
+
+dftrain <- dftrain[-llrem,]
+```
+```{r}
+mfin5 <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
+    enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
+```
+
+```{r}
+llres <- which(abs(rstudent(mfin5)) > 3); llres
+llhat <- which(hatvalues(mfin5) > 3*length(coef(mfin5))/nrow(dftrain)); llhat
+common_outliers <- intersect(llres, llhat); common_outliers
+llcoo <- Boxplot(cooks.distance(mfin5), id=list(n=10,labels=row.names(dftrain)))
+
+lldist <- which(cooks.distance(mfin5)>0.01); lldist
+influencePlot(mfin5)
+```
+In the influent data assesment we removed 10 observations because they have larger Cook's distance.
+
+```{r}
+mfin <- mfin5
+```
+
+
+
+
+# 9. Goodness of fit and Model Interpretation
+
+## Forecasting capability of the final model in the train sample
+
+
+```{r}
+prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
+target.est <- ifelse(prob<0.5,0,1) #apply threshold
+
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftrain$target, prob)
+
+# METRICS
+accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
+tt <- table(target.est,dftrain$target)
+precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
+recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+f1 <-2*((precision*recall)/(precision+recall)); f1
+
+PseudoR2(mfin, which='all') # library(DescTools)
+hoslem.test(dftrain$target, fitted(mfin), g=10) # ResourceSelection library
+
+sum(residuals(mfin, type='pearson')^2) # Pearson's X2
+library(cvAUC)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
+
+
+```{r}
+# Model naive
+m0<-glm(target ~ 1, family=binomial, data=dftrain)
+prob0 <- m0$fit
+target.est0 <- ifelse(prob0<0.5,0,1)
+tt0 <- table(target.est0,dftrain$target)
+tt0
+
+table(target.est0,dftrain$target)[1,2]/(dim(dftrain)[1])
+precision0 <- tt0[1,2]/(tt0[1,2] +tt0[1,1] );precision0
+recall0 <- tt0[1,2]/(tt0[1,2] +0 );recall0
+f10 <-2*((precision0*recall0)/(precision0+recall0)); f10
+
+summary(mfin)
+100*(1-mfin$dev/mfin$null.dev) # pR2 McFadden
+```
+
+
+```{r}
+# Determine the predictive power by analyzing the ROC curve.
+library("ROCR")
+dadesroc<-prediction(predict(mfin,type="response"),dftrain$target)
+par(mfrow=c(1,2))
+plot(performance(dadesroc,"err"))
+plot(performance(dadesroc,"tpr","fpr"))
+abline(0,1,lty=2)
+
+library(cvAUC)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
+```{r}
+prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
+target.est <- ifelse(prob<0.5,0,1) #apply threshold
+
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftrain$target, prob)
+
+# METRICS
+accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
+precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
+recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+f1 <-2*((precision*recall)/(precision+recall)); f1
+
+PseudoR2(mfin, which='all') # library(DescTools)
+hoslem.test(dftrain$target, fitted(mfin), g=10) # ResourceSelection library
+
+sum(residuals(mfin, type='pearson')^2) # Pearson's X2
+library(cvAUC)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
+
+# Point 10: Forecasting capability of the final model. Test sample
+
+```{r}
+probtest <- predict(mfin, newdata=dftest, type="response")
+target.test <- ifelse(probtest<0.4,0,1)
+table(target.test,dftest$target)
+
+# Confusion Matrix
+library(ModelMetrics)
+ModelMetrics::confusionMatrix(dftest$target, target.test)
+
+# METRICS
+accuracy <- sum(diag(table(target.test,dftest$target)))/(dim(dftest)[1]);accuracy
+precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
+recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+f1 <-2*((precision*recall)/(precision+recall)); f1
+
+PseudoR2(mfin, which='all') # library(DescTools)
+hoslem.test(dftest$target, probtest)
+```
+```{r}
+# Model naive dummy model
+m0<-glm(target ~ 1, family=binomial, data=dftest)
+prob.test0 <- m0$fit
+target.test0 <- ifelse(prob.test0<0.5,0,1)
+table(target.test0,dftest$target)
+
+accuracy0 <- table(target.test0,dftest$target)[1,2]/dim(dftest)[1]; accuracy0
+```
+
