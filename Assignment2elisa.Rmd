@@ -42,9 +42,7 @@ The first step is to check the dataset, to understand which variables we can wor
 df <- read.csv("aug_train.csv", header=T)
 summary(df)
 ```
-We will set the datatypes accordingly.
-
-After checking the dataset, we observe that many variable's observations are left in blank, we set them to NA because they are missing data.
+After checking the dataset, we observe that many variable's observations are left in blank, we set them to NA because they are missing data. Then, we will set the datatypes accordingly.
 
 ```{r}
 # Setting NAs
@@ -89,11 +87,9 @@ sum(duplicated(df))
 
 dup_rows <- df %>% 
   filter(duplicated(.) | duplicated(., fromLast = TRUE))
-
 nrow(dup_rows)
 ```
 Then, we check the missing data of the variables to see which ones are the most affected. We also check the count of missing values per individual, to see which observations are not reliable (those with a high % of missing values), to discuss whether or not to remove them. 
-
 ```{r}
 # Number of missing values: Variables
 check_na <- function(x) {
@@ -109,18 +105,17 @@ First, we checked the missing values at the individual level and observed that s
 
 Using the profiling of the missing values per variable, we identified three different behaviors:
 
-  - *Structural and Informative Missingness*: We confirmed that major_discipline is missing mainly for candidates with "High School" education, meaning the variable just doesn't apply (it is not a real missing). Similarly, company_size and company_type are missing when the candidate has no relevant experience or any previous employment.
+  - *Structural and Informative Missingness*: We confirmed that `major_discipline` is missing mainly for candidates with "High School" education, meaning the variable is just not applicable (it is not a real missing). Similarly, `company_size` and `company_type` are missing when the candidate has no relevant experience or any previous employment.
 
 We will recode these to "No Major" and "Undefined" respectively, as this "missing" info is actually describing the candidate's situation (e.g., unemployment).
 
-  - *Systematic Non-Response*: The missingness in gender is associated with missing values in other personal variables, suggesting a specific group of users that choose not to share personal information. We will keep this as a specific category "Undefined" to capture this behavior, rather than imputing it.
+  - *Systematic Non-Response*: The missingness in `gender` is associated with missing values in other personal variables, suggesting a specific group of users that choose not to share personal information. We will keep this as a specific category "Undefined" to capture this behavior, rather than imputing it.
 
-  - *Missing at Random (MAR)*: For experience, education_level, and last_new_job, the missing values depend on other observed variables don't show any clear pattern. We will further analyze whether these are genuine missing values, and if they are, we will use MICE imputation in later steps to fill them without losing information.
+  - *Missing at Random (MAR)*: For `experience`, `education_level`, and `last_new_job`, the missing values depend on other observed variables don't show any clear pattern. We will further analyze whether these are genuine missing values, and if they are, we will use MICE imputation in later steps to fill them without losing information.
 
 After applying these specific treatments (recoding NAs to categories where appropriate), we will re-evaluate the missing values per individual to check if we still need to remove any rows.
   
 ```{r}
-
 # Detect the missingness mechanism (MAR vs MCAR)
 vars_with_na <- names(which(colSums(is.na(df)) > 0))
 
@@ -267,7 +262,6 @@ summary(df$f.training)
 
 #### target
 The variable `target` is a binary variable that defines the positive or negative outcome of the prediction. It has no missing data, and it is clearly unbalanced, which should be taken into account in the modelling stage.
-
 ```{r}
 sum(is.na(df$target))
 table(df$target)
@@ -1180,27 +1174,43 @@ In the influent data assesment we removed 10 observations because they have larg
 mfin <- mfin5
 ```
 
-
-
-
 # 9. Goodness of fit and Model Interpretation
 
-##  Goodness of fit
+## Goodness of fit
+Due to the significant class imbalance in the target (75%-25%), relying only on accuracy is misleading, as the model could simply predict the majority class and appear successful. Therefore, to assess the model's overall ability to distinguish between candidates who want to leave and those who stay, we used the *F1-Score*. This metric is the most appropriate for this business case because it balances Precision and Recall. The company aims to identify as many candidates looking for a change as possible (Recall), but without wasting time and resources contacting people who are not actually interested (Precision). Maximizing the F1-Score allows us to find the best trade-off between capturing talent and reducing costs.
 
 ### Forecasting capability of the final model in the train sample
 
-MFIN
+To select the optimal classification threshold, we used the threshold that minimizes the error rate in the ROC curve, which is 0.4.
+
+```{r}
+# ROC curve
+library("ROCR")
+dadesroc <- prediction(predict(mfin,type="response"),dftrain$target)
+par(mfrow=c(1,2))
+plot(performance(dadesroc,"err"))
+plot(performance(dadesroc,"tpr","fpr"))
+abline(0,1,lty=2)
+
+library(cvAUC)
+AUC(predict(mfin,type="response"),dftrain$target)
+```
+
+Looking at the confusion matrix, the model correctly identifies most candidates who will stay (high true negatives), but it struggles to detect those who plan to leave. Specifically, True Negatives (9781) are much higher than True Positives (623), so the model is good at predicting "will not leave". Also, False Negatives (1726) are relatively large, many candidates who actually plan to leave are misclassified as stayers. False Positives (1577) are also notable, meaning some candidates are incorrectly predicted as leavers. The model performs well for the majority class but has limited ability to capture the minority class (leavers).
+
+We obtain a F1 score of 0.57, which is lower than expected, but if we compare with the dummy model (0.39776), it has improved significantly. Also, to improve this score, we fitted other models to see if adding variables would improve the prediction power, but even with the complete model (with all variables and interactions), the maximum F1 score obtained was 0.605. Due to the low difference in the F1 score, we prioritize a simpler model even if F1 is lower.
+
 ```{r}
 prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
-target.est <- ifelse(prob<0.5,0,1) #apply threshold
+target.est <- ifelse(prob<0.4,0,1) #apply threshold
 
 # Confusion Matrix
+tt <- table(target.est,dftrain$target);tt 
 library(ModelMetrics)
 ModelMetrics::confusionMatrix(dftrain$target, prob)
 
 # METRICS
 accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
-tt <- table(target.est,dftrain$target)
 precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
 recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
 f1 <-2*((precision*recall)/(precision+recall)); f1
@@ -1212,33 +1222,10 @@ sum(residuals(mfin, type='pearson')^2) # Pearson's X2
 library(cvAUC)
 AUC(predict(mfin,type="response"),dftrain$target)
 ```
-MFINOLD (el inicial)
-```{r}
-prob <-mfinold$fit #gives a vector of n observation with probability of voting of each individual
-target.est <- ifelse(prob<0.5,0,1) #apply threshold
-
-# Confusion Matrix
-library(ModelMetrics)
-ModelMetrics::confusionMatrix(dftrain$target, prob)
-
-# METRICS
-accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
-tt <- table(target.est,dftrain$target)
-precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
-recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
-f1 <-2*((precision*recall)/(precision+recall)); f1
-
-PseudoR2(mfin, which='all') # library(DescTools)
-hoslem.test(dftrain$target, fitted(mfinold), g=10) # ResourceSelection library
-
-sum(residuals(mfinold, type='pearson')^2) # Pearson's X2
-library(cvAUC)
-AUC(predict(mfin,type="response"),dftrain$target)
-```
 
 ```{r}
 # Model naive
-m0<-glm(target ~ 1, family=binomial, data=dftrain)
+m0 <- glm(target ~ 1, family=binomial, data=dftrain)
 prob0 <- m0$fit
 target.est0 <- ifelse(prob0<0.5,0,1)
 tt0 <- table(target.est0,dftrain$target)
@@ -1248,63 +1235,24 @@ table(target.est0,dftrain$target)[1,2]/(dim(dftrain)[1])
 precision0 <- tt0[1,2]/(tt0[1,2] +tt0[1,1] );precision0
 recall0 <- tt0[1,2]/(tt0[1,2] +0 );recall0
 f10 <-2*((precision0*recall0)/(precision0+recall0)); f10
-
-summary(mfin)
-100*(1-mfin$dev/mfin$null.dev) # pR2 McFadden
-```
-
-
-```{r}
-# Determine the predictive power by analyzing the ROC curve.
-library("ROCR")
-dadesroc<-prediction(predict(mfin,type="response"),dftrain$target)
-par(mfrow=c(1,2))
-plot(performance(dadesroc,"err"))
-plot(performance(dadesroc,"tpr","fpr"))
-abline(0,1,lty=2)
-
-library(cvAUC)
-AUC(predict(mfin,type="response"),dftrain$target)
-```
-```{r}
-prob <-mfin$fit #gives a vector of n observation with probability of voting of each individual
-target.est <- ifelse(prob<0.5,0,1) #apply threshold
-tt <- table(target.est,dftrain$target)
-
-# Confusion Matrix
-library(ModelMetrics)
-ModelMetrics::confusionMatrix(dftrain$target, prob)
-
-# METRICS
-accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]);accuracy
-precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
-recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
-f1 <-2*((precision*recall)/(precision+recall)); f1
-
-PseudoR2(mfin, which='all') # library(DescTools)
-hoslem.test(dftrain$target, fitted(mfin), g=10) # ResourceSelection library
-
-sum(residuals(mfin, type='pearson')^2) # Pearson's X2
-library(cvAUC)
-AUC(predict(mfin,type="response"),dftrain$target)
 ```
 
 ### Forecasting capability of the final model in the test sample
-
+In the test sample, we expect similar results to those in the train sample to assess whether the model is overfitting. We observe that the metrics do not differ much, indicating that the model generalizes well to the test sample.
 ```{r}
 probtest <- predict(mfin, newdata=dftest, type="response")
 target.test <- ifelse(probtest<0.4,0,1)
 table(target.test,dftest$target)
-tt <- table(target.test,dftest$target)
 
 # Confusion Matrix
+tttest <- table(target.test,dftest$target);tttest #confusion matrix
 library(ModelMetrics)
 ModelMetrics::confusionMatrix(dftest$target, target.test)
 
 # METRICS
 accuracy <- sum(diag(table(target.test,dftest$target)))/(dim(dftest)[1]);accuracy
-precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
-recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
+precision <- tttest[2,2]/(tttest[2,2] +tttest[2,1] );precision
+recall <- tttest[2,2]/(tttest[2,2] +tttest[1,2] );recall
 f1 <-2*((precision*recall)/(precision+recall)); f1
 
 PseudoR2(mfin, which='all') # library(DescTools)
@@ -1312,33 +1260,35 @@ hoslem.test(dftest$target, probtest)
 ```
 
 ```{r}
-probtest <- predict(mfinold, newdata=dftest, type="response")
-target.test <- ifelse(probtest<0.4,0,1)
-table(target.test,dftest$target)
-tt <- table(target.test,dftest$target)
+# Model naive
+m0test <- glm(target ~ 1, family=binomial, data=dftest)
+prob0test <- m0test$fit
+target.test0 <- ifelse(prob0test<0.5,0,1)
+tt0test <- table(target.test0,dftest$target)
+tt0test
 
-# Confusion Matrix
-library(ModelMetrics)
-ModelMetrics::confusionMatrix(dftest$target, target.test)
-
-# METRICS
-accuracy <- sum(diag(table(target.test,dftest$target)))/(dim(dftest)[1]);accuracy
-precision <- tt[2,2]/(tt[2,2] +tt[2,1] );precision
-recall <- tt[2,2]/(tt[2,2] +tt[1,2] );recall
-f1 <-2*((precision*recall)/(precision+recall)); f1
-
-PseudoR2(mfinold, which='all') # library(DescTools)
-hoslem.test(dftest$target, probtest)
+table(target.test0,dftest$target)[1,2]/(dim(dftest)[1])
+precision0test <- tt0test[1,2]/(tt0test[1,2] +tt0test[1,1]);precision0test
+recall0test <- tt0test[1,2]/(tt0test[1,2] +0 );recall0test
+f10test <-2*((precision0test*recall0test)/(precision0test+recall0test)); f10test
 ```
 
+## Model interpretation
+
+If we want to find out the probability of a person who:
+- lives in a city with `city_development_index` 
+- gender = Female
 ```{r}
-# Model naive dummy model
-m0<-glm(target ~ 1, family=binomial, data=dftest)
-prob.test0 <- m0$fit
-target.test0 <- ifelse(prob.test0<0.5,0,1)
-table(target.test0,dftest$target)
-
-accuracy0 <- table(target.test0,dftest$target)[1,2]/dim(dftest)[1]; accuracy0
+summary(mfin)
+exp(coef(m1)[2])
+mean(elecc92$pres)*(1-mean(elecc92$pres))*coef(m1)[2]
+# Interpret the estimated coefficients in terms of logodds, odds, and probabilities.
+# Logodds of voting increase by 0.0135 units by year
+# Odds of voting are multiplied by 1.014 each year or increased by 1.4% every year (exp(beta2)-1)*100.
+# Probability of voting increases by 0.0029 absolute unit each year of age
+# Which would the probability of voting be for a citizen on the median of age in the sample (42 years)
+median(elecc92$age)
+eta <- coef(m1)[1] + coef(m1)[2]* median(elecc92$pres); eta
+exp(eta) # 1.26 to 1
+exp(eta)/(1+exp(eta)) #probability of them going to vote is 55%
 ```
-
-##  Goodness of fit
