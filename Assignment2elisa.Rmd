@@ -1163,7 +1163,11 @@ abline(0,1,lty=2)
 library(cvAUC)
 AUC(predict(mfin,type="response"),dftrain$target)
 ```
-Looking at the confusion matrix
+Keeping in mind that:
+1 = candidate is looking for a new job (likely to come to our company after the training)
+0 = candidate is NOT looking for a new job (likely to not come to our company after the training, so, leave our company)
+
+Looking at the confusion matrix:
             Actual target
 Predicted     0      1
         0   9713   1593
@@ -1281,20 +1285,36 @@ f10test <-2*((precision0test*recall0test)/(precision0test+recall0test)); f10test
 
 ## Model interpretation
 
-If we want to find out the probability of a person who:
-- lives in a city with `city_development_index` 
-- gender = Female
+Due to the presence of nonlinear terms for `city_development_index` and interaction effects, the interpretation of individual coefficients in the final logistic regression model is not straightforward. 
+
+*1) `training_hours`*
+First of all, training_hours has a coefficient of -0.001202, the negative sign suggests that candidates with more training hours are slightly more likely to leave.
+
+*2) `relevent_experience`*
+All else being equal (ceteris paribus), candidates without relevant experience have lower odds of staying compared to those with relevant experience, as indicated by the negative coefficient for relevent_experienceNo (β = −0.265). This implies that, relative to the reference group (relevent_experienceYes), the odds of staying for candidates without relevant experience are multiplied by exp(−0.265) = 0.77, so going from relevent_experienceYes to relevent_experienceNo leads to a reduction of approximately 23% in the odds of staying, except where this effect is modified by interactions with last_new_job.
+
 ```{r}
-summary(mfin)
-exp(coef(m1)[2])
-mean(elecc92$pres)*(1-mean(elecc92$pres))*coef(m1)[2]
-# Interpret the estimated coefficients in terms of logodds, odds, and probabilities.
-# Logodds of voting increase by 0.0135 units by year
-# Odds of voting are multiplied by 1.014 each year or increased by 1.4% every year (exp(beta2)-1)*100.
-# Probability of voting increases by 0.0029 absolute unit each year of age
-# Which would the probability of voting be for a citizen on the median of age in the sample (42 years)
-median(elecc92$age)
-eta <- coef(m1)[1] + coef(m1)[2]* median(elecc92$pres); eta
-exp(eta) # 1.26 to 1
-exp(eta)/(1+exp(eta)) #probability of them going to vote is 55%
+summary(mfin6)
+exp(coef(mfin6))
+(exp(coef(mfin6)[6])-1)*100 #            -23.27009%
 ```
+
+*3) `enrolled_university`*
+ENCARA NO L'HE INTERPRETAT PQ M'ESTIC LIANT
+
+*4) `education_level`*
+Regarding education level, candidates with High School, Primary School, Master’s, or PhD education all have significantly lower odds of staying compared to the reference education category. For instance, candidates with only Primary School education have odds of staying multiplied by exp(-1.28) = 0.28, so going from education_levelGraduate to education_levelPrimary School leads to a reduction of 72% the odds of staying.
+
+```{r}
+summary(mfin6)
+exp(coef(mfin6))
+(exp(coef(mfin6)[12])-1)*100 #-72.18273 
+```
+
+*5) `company_size`*
+Regarding the company_size, candidates working in very large companies or in companies with undefined size show significantly higher odds of staying compared to the reference company size, with especially strong effects for the “Undefined” category. However, because company size interacts with the nonlinear city development index, these effects vary depending on the level of city development.
+
+*6) `last_new_job`*
+FALTA
+
+
