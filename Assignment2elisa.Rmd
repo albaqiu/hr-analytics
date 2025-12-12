@@ -1315,6 +1315,7 @@ exp(coef(mfin6))
 Regarding the company_size, candidates working in very large companies or in companies with undefined size show significantly higher odds of staying compared to the reference company size, with especially strong effects for the “Undefined” category. However, because company size interacts with the nonlinear city development index, these effects vary depending on the level of city development.
 
 *6) `last_new_job`*
-FALTA
+ENCARA NO L'HE INTERPRETAT PQ M'ESTIC LIANT
+
 
 
