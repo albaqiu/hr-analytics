@@ -750,16 +750,6 @@ dftest <- dfpost[-lltrain,]
 
 # 4. Modeling using numeric variables
 
-RESUM DEL QUE HE FET:
-m1: todas las numericas. todas significativas
-m4: polycity2. todas signif. 
-m5: polycity3. todas signif.
-m8: polyexperience2. todas signif.
-m6. cambiamos polyexperience por factor y da 20 mejor de aic como numerica. todo signif.
-m5b: probamos con training as a factor y step lo quita, pero Anova lo pone signif. y el aic es 10 unidades mas bajo con numerica.
-
-RESULTADO. polycity3 + polyexp2 + traning_hours
-
 ```{r}
 # Null model (m0)
 m0 <- glm(target ~ 1, family="binomial", data = dftrain) 
@@ -802,7 +792,7 @@ After observing the marginal model plots, we define a new model adding a quadrat
 ```{r}
 # Model with poly(city_development_index, 2)
 m2 <- glm(target ~ poly(city_development_index,2) + training_hours + experience, family="binomial", data = dftrain)
-summary(m4)
+summary(m2)
 
 vif(m2)
 step(m2, k= log(nrow(dftrain)))
@@ -956,8 +946,8 @@ mi1 <- glm(target ~ poly(city_development_index,3)*(relevent_experience + enroll
 summary(mi1)
 step(mi1, k= log(nrow(dftrain))) # poly(city_development_index,3):company_size 
 Anova(mi1, test="LR")
-anova(m12, mi1, test="Chisq") 
-AIC(m10, m12, mi1)
+anova(m11, mi1, test="Chisq") 
+AIC(m10, m11, mi1)
 ```
 ```{r}
 mi1 <- glm(target ~ training_hours*(relevent_experience + enrolled_university + education_level + 
@@ -1003,7 +993,7 @@ marginalModelPlots(mfinal)
 ```
 
 
-AQUEST ERA EL MODEL QUE HAVIEM CONSIDERAT INICIALMENT
+AQUEST ERA EL MODEL QUE HAVIEM CONSIDERAT INICIALMENT (ELIMINAR QUAN HO LLEGIS)
 ```{r}
 mfinold <- glm(target ~ poly(city_development_index,3) + relevent_experience + 
     enrolled_university + education_level + company_size + last_new_job + relevent_experience:last_new_job + poly(city_development_index,3):company_size, family="binomial", data = dftrain)
@@ -1029,7 +1019,7 @@ Diagnose your final model by detecting influential observations.
 
 ```{r}
 llres <- which(abs(rstudent(mfinal)) > 3); llres
-llhat <- which(hatvalues(mfinal) > 3*length(coef(mfin))/nrow(dftrain)); llhat
+llhat <- which(hatvalues(mfinal) > 3*length(coef(mfinal))/nrow(dftrain)); llhat
 common_outliers <- intersect(llres, llhat); common_outliers
 llcoo <- Boxplot(cooks.distance(mfinal), id=list(n=10,labels=row.names(dftrain)))
 
@@ -1165,7 +1155,9 @@ AUC(predict(mfin,type="response"),dftrain$target)
 ```
 Keeping in mind that:
 1 = candidate is looking for a new job (likely to come to our company after the training)
-0 = candidate is NOT looking for a new job (likely to not come to our company after the training, so, leave our company)
+For us, this means they will stay in our company after training --> stay
+0 = candidate is NOT looking for a new job (likely to not come to our company after the training)
+For us, this means they will leave our company after training to stay in their current job --> leave
 
 Looking at the confusion matrix:
             Actual target
@@ -1286,36 +1278,65 @@ f10test <-2*((precision0test*recall0test)/(precision0test+recall0test)); f10test
 ## Model interpretation
 
 Due to the presence of nonlinear terms for `city_development_index` and interaction effects, the interpretation of individual coefficients in the final logistic regression model is not straightforward. 
+```{r}
+# summary(mfin6)
+```
 
 *1) `training_hours`*
-First of all, training_hours has a coefficient of -0.001202, the negative sign suggests that candidates with more training hours are slightly more likely to leave.
-
-*2) `relevent_experience`*
-All else being equal (ceteris paribus), candidates without relevant experience have lower odds of staying compared to those with relevant experience, as indicated by the negative coefficient for relevent_experienceNo (β = −0.265). This implies that, relative to the reference group (relevent_experienceYes), the odds of staying for candidates without relevant experience are multiplied by exp(−0.265) = 0.77, so going from relevent_experienceYes to relevent_experienceNo leads to a reduction of approximately 23% in the odds of staying, except where this effect is modified by interactions with last_new_job.
+First of all, training_hours has a coefficient of -0.001202, the negative sign suggests that, all else being equal, each additional training hour is associated with a 0.12% decrease in the odds that the candidate is looking for a new job (target = 1).
+*Candidates with more training hours are less likely to join our company after training, and therefore more likely to leave us and stay with their current employer.* (LAIA ESTA PART ES LA QUE EM SEMBLAVA RARO MIRA SI TÉ SENTIT O NO)
 
 ```{r}
-summary(mfin6)
-exp(coef(mfin6))
+(exp(coef(mfin6)[5])-1)*100
+```
+
+
+*2) `relevent_experience`*
+All else being equal (ceteris paribus), candidates without relevant experience have lower odds of staying compared to those with relevant experience, as indicated by the negative coefficient for relevent_experienceNo (β = −0.265). 
+
+This implies that, relative to the reference group (relevent_experienceYes), the odds of staying for candidates without relevant experience are multiplied by exp(−0.265) = 0.77, so going from relevent_experienceYes to relevent_experienceNo leads to a reduction of approximately 23% in the odds of staying, except where this effect is modified by interactions with last_new_job.
+
+```{r}
 (exp(coef(mfin6)[6])-1)*100 #            -23.27009%
 ```
 
 *3) `enrolled_university`*
-ENCARA NO L'HE INTERPRETAT PQ M'ESTIC LIANT
+All else being equal, we have a 25% reduction in the odds of candidates staying (target=1) when going from full_enrollment to no_enrollment. In contrast, candidates enrolled in a part-time course show only a small reduction of about 3% in the odds of staying compared to full-time students, and this difference is not statistically significant.
+
+```{r}
+(exp(coef(mfin6)[7])-1)*100 #-25.39141 
+(exp(coef(mfin6)[8])-1)*100 # -2.986245 
+```
 
 *4) `education_level`*
 Regarding education level, candidates with High School, Primary School, Master’s, or PhD education all have significantly lower odds of staying compared to the reference education category. For instance, candidates with only Primary School education have odds of staying multiplied by exp(-1.28) = 0.28, so going from education_levelGraduate to education_levelPrimary School leads to a reduction of 72% the odds of staying.
 
 ```{r}
-summary(mfin6)
-exp(coef(mfin6))
 (exp(coef(mfin6)[12])-1)*100 #-72.18273 
 ```
 
 *5) `company_size`*
-Regarding the company_size, candidates working in very large companies or in companies with undefined size show significantly higher odds of staying compared to the reference company size, with especially strong effects for the “Undefined” category. However, because company size interacts with the nonlinear city development index, these effects vary depending on the level of city development.
+Regarding company size, candidates working in very large companies show significantly higher odds of staying with the company compared to those working in small companies, with odds increasing by approximately 33%, all else equal. An even stronger effect is observed for candidates working in companies with undefined size, whose odds of staying are more than three times higher than those in small companies. In contrast, candidates working in medium or large companies do not exhibit statistically significant differences in staying odds relative to small companies.
+
+However, company size interacts with the nonlinear city development index, so these effects vary depending on the level of city development.
+```{r}
+(exp(coef(mfin6)[13])-1)*100 # -5.695586 
+(exp(coef(mfin6)[14])-1)*100 # -3.848958 
+(exp(coef(mfin6)[15])-1)*100 # 32.94062 
+(exp(coef(mfin6)[16])-1)*100 # 356.8307 
+```
+
 
 *6) `last_new_job`*
-ENCARA NO L'HE INTERPRETAT PQ M'ESTIC LIANT
+None of the last_new_job levels show statistically significant differences in the odds of staying with the company compared to the reference category. Although the coefficients suggest slightly higher odds of staying for candidates who changed jobs 2 or 3 years ago, but these effects are not statistically significant.
+
+Moreover, the presence of interaction terms with relevant experience indicates that the effect of time since the last job change depends on the candidate's experience.
+```{r}
+(exp(coef(mfin6)[17])-1)*100 # 2.833959 
+(exp(coef(mfin6)[18])-1)*100 # 12.32427 
+(exp(coef(mfin6)[19])-1)*100 # 26.24787 
+(exp(coef(mfin6)[20])-1)*100 #5.221855 
+```
 
 
 
