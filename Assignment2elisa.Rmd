@@ -1144,10 +1144,6 @@ mfin <- mfin6
 ```
 
 # 9. Goodness of fit and Model Interpretation
-To interpret the model, we need to know which mistake is worse for the company:
-- False positive: model predicts 'will stay' (1) and actually 'leaves'(0). In this case, Company invests training but candidate leaves, leading to unnecessary costs.
-- False negative: model predicts 'leaves' (0) and actually 'will stay' (1). In this case, you skip or deprioritize a good candidate, but in this case, cost is real, but lower than FP.
-So FP are more expensive than FN.
 
 ## Goodness of fit
 Due to the significant class imbalance in the target (75%-25%), relying only on accuracy is misleading, as the model could simply predict the majority class and appear successful. Therefore, to assess the model's overall ability to distinguish between candidates who want to leave and those who stay, we used the *F1-Score*. This metric is the most appropriate for this business case because it balances Precision and Recall. The company aims to identify as many candidates looking for a change as possible (Recall), but without wasting time and resources contacting people who are not actually interested (Precision). Maximizing the F1-Score allows us to find the best trade-off between capturing talent and reducing costs.
@@ -1167,10 +1163,27 @@ abline(0,1,lty=2)
 library(cvAUC)
 AUC(predict(mfin,type="response"),dftrain$target)
 ```
-!!!!change numbers
-Looking at the confusion matrix, the model correctly identifies most candidates who will stay (high true negatives), but it struggles to detect those who plan to leave. Specifically, True Negatives (9781) are much higher than True Positives (623), so the model is good at predicting "will not leave". Also, False Negatives (1726) are relatively large, many candidates who actually plan to leave are misclassified as stayers. False Positives (1577) are also notable, meaning some candidates are incorrectly predicted as leavers. The model performs well for the majority class but has limited ability to capture the minority class (leavers).
+Looking at the confusion matrix
+            Actual target
+Predicted     0      1
+        0   9713   1593
+        1   1751   2236
+We have:
+- 9713 TN: people predicted to leave and actually leaves.
+- 1751 FP: people predicted to stay and actually leaves.
+- 1593 FN: people predicted to leave that actually stays.
+- 2236 TP: people predicted to stay that actually stays.
 
-We obtain a F1 score of 0.57, which is lower than expected, but if we compare with the dummy model (0.39776), it has improved significantly. Also, to improve this score, we fitted other models to see if adding variables would improve the prediction power, but even with the complete model (with all variables and interactions), the maximum F1 score obtained was 0.605. Due to the low difference in the F1 score, we prioritize a simpler model even if F1 is lower.
+To interpret the model, we need to know which mistake is worse for the company:
+- False positive: model predicts 'will stay' (1) and actually 'leaves'(0). In this case, Company invests training but candidate leaves, leading to unnecessary costs.
+- False negative: model predicts 'leaves' (0) and actually 'will stay' (1). In this case, you skip or deprioritize a good candidate, but in this case, cost is real, but lower than FP.
+So FP are more expensive than FN. 
+
+The model correctly classifies a large number of candidates who will leave, as reflected by the high number of True Negatives (9713). However, given the dominance of class 0 in the data, this result is expected and does not necessarily indicate strong predictive ability. A model biased toward predicting the majority class can achieve high apparent performance by primarily predicting "will leave". In contrast, the model performs worse on the minority class. The number of True Positives (2236) is relatively low compared to the number of candidates who actually stay, indicating limited ability to identify stayers.
+
+We obtain a F1 score of 0.57, which is lower than expected, but if we compare with the dummy model (0.40), it has improved significantly. Also, to improve this score, we fitted other models to see if adding variables would improve the prediction power, but even with the complete model (with all variables and interactions), the maximum F1 score obtained was 0.605. Due to the low difference in the F1 score, we prioritize a simpler model even if F1 is lower.
+
+ROC curves and AUC are used as complementary tools to assess the model's overall discriminative ability independently of any classification threshold. However, due to class imbalance and asymmetric misclassification costs, ROC/AUC are not used as primary evaluation metrics. AUC = 0.79, this suggests that the model separates stayers from leavers reasonably well, though there is room for improvement.
 
 ```{r}
 prob <-mfin$fit #predicted probability P(pres = 1) for each individual
@@ -1205,7 +1218,7 @@ sum(residuals(mfin, type='pearson')^2) # Pearson's X2
 
 # ROC curve and AUCto evaluate discrimination ability independently of threshold
 library(cvAUC)
-AUC(predict(mfin,type="response"),dftrain$target)
+AUC(prob,dftrain$target)
 ```
 
 ```{r}
@@ -1246,6 +1259,10 @@ f1 <-2*((precision*recall)/(precision+recall)); f1
 
 PseudoR2(mfin, which='all') # library(DescTools)
 hoslem.test(dftest$target, probtest)
+
+# ROC curve and AUCto evaluate discrimination ability independently of threshold
+library(cvAUC)
+AUC(probtest, dftest$target)
 ```
 
 ```{r}
