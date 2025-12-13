@@ -1,8 +1,9 @@
 ---
 title: "Assignment2"
 output:
-  pdf_document: default
+  word_document: default
   html_document: default
+  pdf_document: default
 ---
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -42,7 +43,7 @@ The first step is to check the dataset, to understand which variables we can wor
 ```{r}
 # Loading data
 df <- read.csv("aug_train.csv", header=T)
-summary(df)
+#summary(df)
 ```
 
 After checking the dataset, we observe that many variable's observations are left in blank, we set them to NA because they are missing data. Then, we will set the datatypes accordingly.
@@ -79,7 +80,7 @@ nrow(distinct(df, df$city, df$city_development_index))
 ```{r}
 # Remove city and enrollee_id variables from the dataset
 df <- df[,-c(1,2)]
-str(df)
+#str(df)
 ```
 
 After removing `enrollee_id` we found 60 observations that contain the same information for every variable in the dataset. Considering the background of this dataset, this could happen, as the variables characterize the profile in a general way, making it possible to have the exact same information corresponding to two different individuals. Thus, we consider the best option is not to remove these observations and retain them.
@@ -124,29 +125,29 @@ After applying these specific treatments (recoding NAs to categories where appro
 # Detect the missingness mechanism (MAR vs MCAR)
 vars_with_na <- names(which(colSums(is.na(df)) > 0))
 
-for (var in vars_with_na) {
-  cat(paste0("\n>>> ", var, "\n"))
-  
-  df_shadow <- df
-  df_shadow$IS_MISSING <- factor(ifelse(is.na(df[[var]]), "Yes_Missing", "No_Present"))
-  df_shadow[[var]] <- NULL 
-  if("enrollee_id" %in% names(df_shadow)) df_shadow$enrollee_id <- NULL
-
-  res.cat <- catdes(df_shadow, num.var = which(names(df_shadow) == "IS_MISSING"), proba = 0.05)
-  if (!is.null(res.cat$test.chi2)) {
-    cat("\nGLOBAL ASSOCIATION\n")
-    print(head(res.cat$test.chi2, 10)) 
-  }
-  if (!is.null(res.cat$category) && "Yes_Missing" %in% names(res.cat$category)) {
-    cat("\nMISSINGNESS PROFILE\n")
-    print(head(res.cat$category[["Yes_Missing"]], 10))
-  }
-  
-  if (!is.null(res.cat$quanti.var)) {
-    cat("\nNUMERIC VARS\n")
-    print(res.cat$quanti.var)
-  }
-}
+# for (var in vars_with_na) {
+#   cat(paste0("\n>>> ", var, "\n"))
+#   
+#   df_shadow <- df
+#   df_shadow$IS_MISSING <- factor(ifelse(is.na(df[[var]]), "Yes_Missing", "No_Present"))
+#   df_shadow[[var]] <- NULL 
+#   if("enrollee_id" %in% names(df_shadow)) df_shadow$enrollee_id <- NULL
+# 
+#   res.cat <- catdes(df_shadow, num.var = which(names(df_shadow) == "IS_MISSING"), proba = 0.05)
+#   if (!is.null(res.cat$test.chi2)) {
+#     cat("\nGLOBAL ASSOCIATION\n")
+#     print(head(res.cat$test.chi2, 10)) 
+#   }
+#   if (!is.null(res.cat$category) && "Yes_Missing" %in% names(res.cat$category)) {
+#     cat("\nMISSINGNESS PROFILE\n")
+#     print(head(res.cat$category[["Yes_Missing"]], 10))
+#   }
+#   
+#   if (!is.null(res.cat$quanti.var)) {
+#     cat("\nNUMERIC VARS\n")
+#     print(res.cat$quanti.var)
+#   }
+# }
 ```
 
 
@@ -158,7 +159,7 @@ for (var in vars_with_na) {
 The variable `city_development_index` has no NA and no severe outliers, only mild outliers, but we won't remove them.
 
 ```{r}
-summary(df$city_development_index)
+#summary(df$city_development_index)
 
 # Outliers
 varout <- summary(df$city_development_index)
@@ -176,8 +177,8 @@ abline(v=usout,col='red', add = T)
 abline(v=lsout,col='red', add = T)
 abline(v=umout,col='orange', add = T)
 abline(v=lmout,col='orange', add = T)
-length(sev_out) #0
-length(mild_out) #17
+#length(sev_out) #0
+#length(mild_out) #17
 
 # Distribution
 hist(df$city_development_index, freq = F)
@@ -190,7 +191,7 @@ curve(dnorm(x,m,std),add=T, col="red")
 The variable `training_hours` does not have any missing values.
 
 ```{r}
-summary(df$training_hours)
+#summary(df$training_hours)
 
 # Outliers
 varout <- summary(df$training_hours)
@@ -201,9 +202,9 @@ umout <- varout[5]+1.5*iqr
 lmout <- varout[2]-1.5*iqr
 
 sev_out <- which((df$training_hours > usout) | (df$training_hours < lsout))
-length(sev_out) #275
+#length(sev_out) #275
 mild_out <- which((df$training_hours > umout) | (df$training_hours < lmout))
-length(mild_out) #984
+#length(mild_out) #984
 
 boxplot(df$training_hours, horizontal = T, main = "Boxplot training_hours")
 abline(v=usout,col='red', add = T)
@@ -233,8 +234,8 @@ lsout <- varout[2]-3*iqr
 umout <- varout[5]+1.5*iqr
 lmout <- varout[2]-1.5*iqr
 
-sev_out <- which((df$log_th > usout) | (df$log_th < lsout)); length(sev_out) #0
-mild_out <- which((df$log_th > umout) | (df$log_th < lmout)); length(mild_out) #224
+#sev_out <- which((df$log_th > usout) | (df$log_th < lsout)); length(sev_out) #0
+#mild_out <- which((df$log_th > umout) | (df$log_th < lmout)); length(mild_out) #224
 
 boxplot(df$log_th, horizontal = T, main = "Boxplot log(training_hours)")
 abline(v=usout,col='red', add = T)
@@ -750,7 +751,7 @@ ptt <- prop.table(table(dftrain$target)); ptt # imbalanced
 
 All variables in the model with all numeric variables are significative.
 ```{r}
-num_vars <- names(dftrain)[sapply(dftrain, is.numeric)][1:3]; num_vars
+num_vars <- names(dftrain)[sapply(dftrain, is.numeric)][1:3]
 
 # Model with all numeric vars (m1)
 m1 <- glm(target ~ experience + city_development_index + training_hours, family="binomial", data = dftrain)
