@@ -1107,7 +1107,7 @@ mfin <- mfin6
 # 9. Goodness of fit and Model Interpretation
 
 ## 9.1. Goodness of fit
-Due to the significant class imbalance in the target (75%-25%), relying only on accuracy is misleading, as the model could simply predict the majority class and appear successful. Therefore, to assess the model's overall ability to distinguish between candidates who want to leave and those who stay, we used the **F1-Score**. This metric is the most appropriate for this business case because it balances precision and recall. The company aims to identify as many candidates looking for a change as possible (Recall), but without wasting time and resources contacting people who are not actually interested (Precision). Maximizing the F1-Score allows us to find the best trade-off between capturing talent and reducing costs.
+Due to the significant class imbalance in the target (75%-25%), relying only on accuracy is misleading, as the model could simply predict the majority class and appear successful. Therefore, to assess the model's overall ability to distinguish between candidates who want to leave and those who stay, we used the **F1-Score**. This metric is the most appropriate for this business case because it balances precision and recall. The company aims to identify as many candidates looking for a change as possible (Recall), but without wasting time and resources contacting people who are not actually interested (Precision). Maximizing the F1-Score allows to find the best trade-off between capturing talent and reducing costs.
 
 ### Forecasting capability of the final model in the train sample
 To select the optimal classification threshold, the threshold that minimizes the error rate in the ROC curve (0.4) is used.
@@ -1126,48 +1126,54 @@ AUC(predict(mfin,type="response"),dftrain$target)
 ```
 
 Keeping in mind that:
-- target = 1 means a candidate is looking for a new job (likely to come to our company after the training), so the candidate will stay in our company after training.
-- target = 0 means a candidate is not looking for a new job (likely to not come to our company after the training), so the candidate will leave our company after training to stay in their current job.
+- target = 1 indicates a candidate is actively looking for a new job and therefore more likely to join our company after training.
+- target = 0 indicates a candidate is not looking for a new job and is therefore unlikely to join our company.
 
-The confusion matrix reveals:
+The confusion matrix from the final model reveals that:
             Actual target
 Predicted     0      1
         0   9713   1593
         1   1751   2236
         
-- 9713 TN: people predicted to leave and actually leaves.
-- 1751 FP: people predicted to stay and actually leaves.
-- 1593 FN: people predicted to leave that actually stays.
-- 2236 TP: people predicted to stay that actually stays.
+- 9713 TN: candidates predicted not to join who indeed do not join.
+- 1751 FP: candidates predicted to join who actually do not join.
+- 1593 FN: candidates predicted not to join who actually join.
+- 2236 TP: candidates correctly predicted to join.
 
-To interpret the model, we need to know which mistake is worse for the company:
-- False positive: model predicts 'will stay' (1) and actually 'leaves' (0). In this case, company invests training but candidate leaves, leading to unnecessary costs.
-- False negative: model predicts 'leaves' (0) and actually 'will stay' (1). In this case, you skip a good candidate, but in this case, the cost is real, but lower than the FP one.
-Therefore, FP are more expensive than FN. 
+To interpret the model, it is essential to consider which type of error is more costly for the company:
 
-The model correctly classifies a large number of candidates who will leave, as reflected by the high number of True Negatives (9713). However, given the dominance of class 0 in the data, this result is expected and does not necessarily indicate strong predictive ability. A model biased toward predicting the majority class can achieve high apparent performance by primarily predicting "will leave". In contrast, the model performs worse on the minority class. The number of True Positives (2236) is relatively low compared to the number of candidates who actually stay, indicating limited ability to identify stayers.
+- False Positive (FP): the model predicts that a candidate will join the company, but the candidate does not actually join. In this case, the company may invest time and resources in training a candidate who ultimately does not join, leading to unnecessary costs.
 
-We obtain a F1 score of 0.57, which is lower than expected, but if we compare with the dummy model (0.40), it has improved significantly. Also, to improve this score, we fitted other models to see if adding variables would improve the prediction power, but even with the complete model (with all variables and interactions), the maximum F1 score obtained was 0.605. Due to the low difference in the F1 score, we prioritize a simpler model even if F1 is lower.
+- False Negative (FN): the model predicts that a candidate will not join, but the candidate would have joined. This results in missing a potentially valuable candidate, which represents a real but lower cost compared to a false positive.
 
-ROC curves and AUC are used as complementary tools to assess the model's overall discriminative ability independently of any classification threshold. However, due to class imbalance and asymmetric misclassification costs, ROC/AUC are not used as primary evaluation metrics. AUC = 0.79, this suggests that the model separates stayers from leavers reasonably well, though there is room for improvement.
+Therefore, false positives are considered more expensive than false negatives.
+
+The model correctly classifies a large number of candidates who will not join the company, as reflected by the high number of true negatives (9713). However, given the dominance of class 0 in the data, this result is expected and does not necessarily indicate strong predictive ability. A model biased toward predicting the majority class can achieve high apparent performance by primarily predicting non-joiners.
+
+In contrast, the model performs worse on the minority class. The number of true positives (2236) is relatively low compared to the total number of candidates who would actually join the company, indicating limited ability to identify potential joiners.
+
+We obtain an F1-score of 0.57, which, although moderate, represents a substantial improvement over the naive baseline model (F1 = 0). More complex models were also tested, achieving a maximum F1-score of 0.605. Given the relatively small improvement, a simpler model was preferred.
+
+ROC curves and AUC are used as complementary tools to assess the model’s overall discriminative ability independently of any specific classification threshold. However, due to class imbalance and asymmetric misclassification costs, ROC/AUC are not used as primary evaluation metrics. An AUC of 0.79 suggests that the model reasonably separates candidates who are likely to join from those who are not, although there is room for improvement.
 
 ```{r}
-prob <- mfin$fit #predicted probability P(pres = 1) for each individual
-target.est <- ifelse(prob<0.4,0,1) #convert probabilities into class predictions (0/1) using a cutoff
+prob <- mfin$fit # predicted probability P(pres = 1) for each individual
+target.est <- ifelse(prob<0.4,0,1) # convert probabilities into class predictions (0/1) using a cutoff
 
 # Confusion Matrix
 tt <- table(target.est,dftrain$target); tt 
 
 library(ModelMetrics) 
-ModelMetrics::confusionMatrix(dftrain$target, prob) # this has threshold 0.5
+ModelMetrics::confusionMatrix(dftrain$target, prob) # threshold 0.5
 
-# METRICS
+# MODEL METRICS
+# Accuracy
 accuracy <- sum(diag(table(target.est,dftrain$target)))/(dim(dftrain)[1]); accuracy
 
-# Precision: among predicted positives, how many are truly positive
+# Precision: among predicted positives, how many are truly positive (TP/(TP+FP))
 precision <- tt[2,2]/(tt[2,2] + tt[2,1]); precision
 
-# Recall: among actual positives, how many are detected
+# Recall: among actual positives, how many are detected (TP/(TP+FN))
 recall <- tt[2,2]/(tt[2,2] + tt[1,2]); recall
 
 # F1-score: harmonic mean of precision and recall
@@ -1187,19 +1193,20 @@ library(cvAUC)
 AUC(prob,dftrain$target)
 ```
 
+The naive model predicts all candidates as class 0 (not looking for a new job). As a consequence, it achieves a relatively high accuracy of 0.75, which is driven exclusively by the class imbalance in the data. However, the model completely fails to identify any positive cases. The recall for the positive class (target = 1) is therefore 0, and precision and F1-score cannot be computed because the model never predicts the positive class.
+
 ```{r}
 # Model naive
 m0 <- glm(target ~ 1, family=binomial, data=dftrain)
 
 prob0 <- m0$fit
-target.est0 <- ifelse(prob0<0.5,0,1)
+target.est0 <- ifelse(prob0<0.4,0,1)
 
-tt0 <- table(target.est0,dftrain$target); tt0
+tt0 <- table(target.est0,dftrain$target)
+tt0 <- rbind(tt0, "1" = c(0, 0)); tt0
 
-table(target.est0,dftrain$target)[1,2]/(dim(dftrain)[1])
-precision0 <- tt0[1,2]/(tt0[1,2] + tt0[1,1]); precision0
-recall0 <- tt0[1,2]/(tt0[1,2] +0 ); recall0
-f10 <-2*((precision0*recall0)/(precision0+recall0)); f10
+accuracy0 <- sum(diag(tt0))/(dim(dftrain)[1]); accuracy0 # (TP+TN)/(TP+FP+TN+FN)
+recall0 <- tt0[2,2]/(tt0[1,2] + tt0[2,2]); recall0 # TP/(TP+FN) = 0
 ```
 
 ### Forecasting capability of the final model in the test sample
@@ -1218,8 +1225,8 @@ ModelMetrics::confusionMatrix(dftest$target, target.test)
 
 # METRICS
 accuracy <- sum(diag(table(target.test,dftest$target)))/(dim(dftest)[1]); accuracy
-precision <- tttest[2,2]/(tttest[2,2] +tttest[2,1]); precision
-recall <- tttest[2,2]/(tttest[2,2] +tttest[1,2]); recall
+precision <- tttest[2,2]/(tttest[2,2] + tttest[2,1]); precision
+recall <- tttest[2,2]/(tttest[2,2] + tttest[1,2]); recall
 f1 <- 2*((precision*recall)/(precision+recall)); f1
 
 PseudoR2(mfin, which='all') # library(DescTools)
@@ -1234,14 +1241,12 @@ AUC(probtest, dftest$target)
 # Model naive
 m0test <- glm(target ~ 1, family=binomial, data=dftest)
 prob0test <- m0test$fit
-target.test0 <- ifelse(prob0test<0.5,0,1)
+target.test0 <- ifelse(prob0test<0.4,0,1)
 tt0test <- table(target.test0,dftest$target)
-tt0test
+tt0test <- rbind(tt0test, "1" = c(0, 0)); tt0test
 
-table(target.test0,dftest$target)[1,2]/(dim(dftest)[1])
-precision0test <- tt0test[1,2]/(tt0test[1,2] +tt0test[1,1]); precision0test
-recall0test <- tt0test[1,2]/(tt0test[1,2] + 0); recall0test
-f10test <-2*((precision0test*recall0test)/(precision0test+recall0test)); f10test
+accuracy0test <- sum(diag(tt0test))/(dim(dftrain)[1]); accuracy0test # (TP+TN)/(TP+FP+TN+FN)
+recall0test <- tt0test[2,2]/(tt0test[1,2] + tt0test[2,2]); recall0 # TP/(TP+FN) = 0
 ```
 
 ## 9.2. Model interpretation
